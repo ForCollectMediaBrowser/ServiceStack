@@ -1,5 +1,6 @@
-﻿using System.Web;
-using ServiceStack.Host;
+﻿using System;
+using System.Collections.Generic;
+using System.Web;
 using ServiceStack.Host.Handlers;
 using ServiceStack.Metadata;
 
@@ -7,6 +8,17 @@ namespace ServiceStack
 {
     public class MetadataFeature : IPlugin
     {
+        public string PluginLinksTitle { get; set; }
+        public Dictionary<string, string> PluginLinks { get; set; }
+        public Action<IndexOperationsControl> IndexPageFilter { get; set; }
+        public Action<OperationControl> DetailPageFilter { get; set; }
+
+        public MetadataFeature()
+        {
+            PluginLinksTitle = "Plugin Links:";
+            PluginLinks = new Dictionary<string, string>();
+        }
+
         public void Register(IAppHost appHost)
         {
             appHost.CatchAllHandlers.Add(ProcessRequest);

@@ -36,8 +36,10 @@ namespace ServiceStack.Host.HttpListener
         protected HttpListenerBase(string serviceName, params Assembly[] assembliesWithServices)
             : base(serviceName, assembliesWithServices) {}
 
-        public virtual void OnAfterInit()
+        public override void OnAfterInit()
         {
+            base.OnAfterInit();
+
             SetAppDomainData();
         }
 
@@ -162,7 +164,7 @@ namespace ServiceStack.Host.HttpListener
                 // method, and again, that is just the way most Begin/End asynchronous
                 // methods of the .NET Framework work.
                 var errMsg = ex + ": " + IsListening;
-                Log.Warn(errMsg);
+                Log.Warn(errMsg, ex);
                 return;
             }
             finally
@@ -216,7 +218,7 @@ namespace ServiceStack.Host.HttpListener
         {
             try
             {
-                Log.ErrorFormat("Error this.ProcessRequest(context): [{0}]: {1}", ex.GetType().GetOperationName(), ex.Message);
+                Log.Error("Error this.ProcessRequest(context): [{0}]: {1}".Fmt(ex.GetType().GetOperationName(), ex.Message), ex);
 
                 var errorResponse = new ErrorResponse
                 {
@@ -261,7 +263,7 @@ namespace ServiceStack.Host.HttpListener
             {
                 var error = "Error this.ProcessRequest(context)(Exception while writing error to the response): [{0}]: {1}"
                             .Fmt(errorEx.GetType().GetOperationName(), errorEx.Message);
-                Log.ErrorFormat(error);
+                Log.Error(error, errorEx);
             }
         }
 
@@ -294,7 +296,7 @@ namespace ServiceStack.Host.HttpListener
             {
                 if (ex.ErrorCode != RequestThreadAbortedException) throw;
 
-                Log.ErrorFormat("Swallowing HttpListenerException({0}) Thread exit or aborted request", RequestThreadAbortedException);
+                Log.Error("Swallowing HttpListenerException({0}) Thread exit or aborted request".Fmt(RequestThreadAbortedException), ex);
             }
             this.IsStarted = false;
             this.Listener = null;

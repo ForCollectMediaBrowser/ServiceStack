@@ -25,10 +25,12 @@ var SIGN_PROJS = [
     '../../ServiceStack.Redis/src/ServiceStack.Redis/ServiceStack.Redis.csproj',
     '../../ServiceStack.OrmLite/src/ServiceStack.OrmLite/ServiceStack.OrmLite.csproj',
     '../../ServiceStack.OrmLite/src/ServiceStack.OrmLite.SqlServer/ServiceStack.OrmLite.SqlServer.csproj',
+    '../../ServiceStack.OrmLite/src/ServiceStack.OrmLite.Oracle/ServiceStack.OrmLite.Oracle.csproj',
     '../src/ServiceStack.Common/ServiceStack.Common.csproj',
     '../src/ServiceStack.Client/ServiceStack.Client.csproj',
     '../src/ServiceStack.Server/ServiceStack.Server.csproj',
     '../src/ServiceStack.Razor/ServiceStack.Razor.csproj',
+    '../src/ServiceStack.Api.Swagger/ServiceStack.Api.Swagger.csproj',
     '../src/ServiceStack/ServiceStack.csproj'
 ];
 var SIGN_REPLACE_TEXTS = {
@@ -184,13 +186,20 @@ SIGN_PROJS.forEach(function(proj) {
 log("Generating Custom build .csprojs...");
 
 var CUSTOM_TEMPLATES = [{
+    Code: 'PCL',
+    Path: '../src/Templates/PclTemplate.csproj',
+    ProjectGuid: '{BF5EEDF0-594C-4660-AFF5-AF3423F3602D}',
+    RootNamespace: 'PclTemplate',
+    AssemblyName: 'PclTemplate',
+},
+{
     Code: 'SL5',
     Path: '../src/Templates/SilverlightTemplate.csproj',
     ProjectGuid: '{12B8CB9F-E397-4B5F-89AF-B6998296BFE6}',
     RootNamespace: 'SilverlightTemplate',
     AssemblyName: 'SilverlightTemplate',
-},
-{
+}
+/*,{
     Code: 'Android',
     Path: '../src/Templates/AndroidTemplate.csproj',
     ProjectGuid: '{BEA92E9F-00B1-4923-BD81-7F3A9CA24408}',
@@ -203,7 +212,8 @@ var CUSTOM_TEMPLATES = [{
     ProjectGuid: '{BEA92E9F-00B1-4923-BD81-7F3A9CA24408}',
     RootNamespace: 'AndroidIndieTemplate',
     AssemblyName: 'AndroidIndieTemplate',
-}];
+}*/
+];
 
 var CUSTOM_PROJS = [{
     Path: '../src/ServiceStack.Interfaces/ServiceStack.Interfaces.csproj',
@@ -211,6 +221,20 @@ var CUSTOM_PROJS = [{
         ProjectGuid: '{42E1C8C0-A163-44CC-92B1-8F416F2C0B01}',
         RootNamespace: 'ServiceStack',
         AssemblyName: 'ServiceStack.Interfaces',
+    },
+    ReplaceTemplate: function (code, tmpl) {
+        var replaceTexts = {
+            '<MinimumVisualStudioVersion>11.0</MinimumVisualStudioVersion>': '<MinimumVisualStudioVersion>10.0</MinimumVisualStudioVersion>',
+            '<TargetFrameworkVersion>v4.5</TargetFrameworkVersion>': '<TargetFrameworkVersion>v4.0</TargetFrameworkVersion>',
+            '<TargetFrameworkProfile>Profile7</TargetFrameworkProfile>': '<TargetFrameworkProfile>Profile158</TargetFrameworkProfile>'
+        };
+        if (code == 'PCL') {
+            for (var needle in replaceTexts) {
+                var replaceText = replaceTexts[needle];
+                tmpl = tmpl.replace(needle, replaceText);
+            }
+        }
+        return tmpl;
     }
 },
 {
@@ -226,21 +250,32 @@ var CUSTOM_PROJS = [{
     ReplaceElements: {
         ProjectGuid: '{42E1C8C0-A163-44CC-92B1-8F416F2C0B01}',
         RootNamespace: 'ServiceStack',
-        AssemblyName: 'ServiceStack.Interfaces'
+        AssemblyName: 'ServiceStack.Client'
     },
     ReplaceTexts: {
         '<!--ItemGroup,ProjectReference-->': [
             '<ItemGroup>',
-            '  <ProjectReference Include="..\\..\\..\\ServiceStack.Text\\src\\ServiceStack.Text\\ServiceStack.Text.$Code.csproj">',
-            '    <Project>{579B3FDB-CDAD-44E1-8417-885C38E49A0E}</Project>',
-            '    <Name>ServiceStack.Text.$Code</Name>',
-            '  </ProjectReference>',
             '  <ProjectReference Include="..\\ServiceStack.Interfaces\\ServiceStack.Interfaces.$Code.csproj">',
             '    <Project>{42E1C8C0-A163-44CC-92B1-8F416F2C0B01}</Project>',
             '    <Name>ServiceStack.Interfaces.$Code</Name>',
             '  </ProjectReference>',
+            '</ItemGroup>',
+            '<ItemGroup>',
+            '  <Reference Include="ServiceStack.Text">',
+            '    <HintPath>..\\..\\lib\\ServiceStack.Text.dll</HintPath>',
+            '  </Reference>',
             '</ItemGroup>'
         ].join('\n')
+    },
+    ReplaceTemplate: function (code, tmpl) {
+        if (code == 'SL5') {
+            tmpl = tmpl.replace(/ServiceStack.Interfaces.SL5/g, 'ServiceStack.Interfaces.PCL');
+            tmpl = tmpl.replace('<HintPath>..\\..\\lib\\ServiceStack.Text.dll</HintPath>', '<HintPath>..\\..\\lib\\sl5\\ServiceStack.Text.dll</HintPath>');
+        }
+        else if (code == 'PCL') {
+            tmpl = tmpl.replace('<HintPath>..\\..\\lib\\ServiceStack.Text.dll</HintPath>', '<HintPath>..\\..\\lib\\pcl\\ServiceStack.Text.dll</HintPath>');
+        }
+        return tmpl;
     }
 }];
 
@@ -266,7 +301,8 @@ CUSTOM_TEMPLATES.forEach(function(tmpl) {
         });
 
         Object.keys(proj.ReplaceTexts || {}).forEach(function (from) {
-            var to = proj.ReplaceTexts[from].replace(/\$Code/g, tmpl.Code);
+            var code = tmpl.getCode ? tmpl.getCode(proj) : tmpl.Code;
+            var to = proj.ReplaceTexts[from].replace(/\$Code/g, code);
             log('\nReplaceTexts(' + from + ',' + to + ')\n');
             tmplXml = tmplXml.replace(new RegExp(from,'g'), to);
         });
@@ -336,6 +372,10 @@ CUSTOM_TEMPLATES.forEach(function(tmpl) {
 
             parser.write(xml);
         });
+        
+        if (proj.ReplaceTemplate) {
+            tmplXml = proj.ReplaceTemplate(tmpl.Code, tmplXml);
+        }
 
         var customProjPath = path.join(path.dirname(proj.Path), path.basename(proj.Path).replace(".csproj", "." + tmpl.Code + ".csproj"));
         log("\nwriting transformedXml to: " + customProjPath);

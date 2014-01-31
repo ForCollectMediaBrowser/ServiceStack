@@ -35,7 +35,7 @@ namespace ServiceStack.Messaging
 
         public MessageHandler(IMessageService messageService,
             Func<IMessage<T>, object> processMessageFn)
-            : this(messageService, processMessageFn, null, DefaultRetryCount) {}
+            : this(messageService, processMessageFn, null, DefaultRetryCount) { }
 
         private IMessageQueueClient MqClient { get; set; }
 
@@ -76,23 +76,20 @@ namespace ServiceStack.Messaging
             var msgsProcessed = 0;
             try
             {
-                byte[] messageBytes;
-                while ((messageBytes = mqClient.GetAsync(queueName)) != null)
+                IMessage<T> message;
+                while ((message = mqClient.GetAsync<T>(queueName)) != null)
                 {
-                    var message = messageBytes.ToMessage<T>();
                     ProcessMessage(mqClient, message);
 
-                    this.TotalNormalMessagesReceived++;
                     msgsProcessed++;
-                    LastMessageProcessed = DateTime.UtcNow;
 
-                    if (doNext != null && !doNext()) return msgsProcessed;
+                    if (doNext != null && !doNext()) 
+                        return msgsProcessed;
                 }
             }
             catch (Exception ex)
             {
-                var lastEx = ex;
-                Log.Error("Error serializing message from mq server: " + lastEx.Message, ex);
+                Log.Error("Error serializing message from mq server: " + ex.Message, ex);
             }
 
             return msgsProcessed;
@@ -101,7 +98,7 @@ namespace ServiceStack.Messaging
         public IMessageHandlerStats GetStats()
         {
             return new MessageHandlerStats(typeof(T).GetOperationName(),
-                TotalMessagesProcessed, TotalMessagesFailed, TotalRetries, 
+                TotalMessagesProcessed, TotalMessagesFailed, TotalRetries,
                 TotalNormalMessagesReceived, TotalPriorityMessagesReceived, LastMessageProcessed);
         }
 
@@ -109,42 +106,78 @@ namespace ServiceStack.Messaging
         {
             Log.Error("Message exception handler threw an error", ex);
 
-            if (!(ex is UnRetryableMessagingException))
-            {
-                if (message.RetryAttempts < retryCount)
-                {
-                    message.RetryAttempts++;
-                    this.TotalRetries++;
+            bool requeue = !(ex is UnRetryableMessagingException)
+                && message.RetryAttempts < retryCount;
 
-                    message.Error = new MessagingException(ex.Message, ex).ToMessageError();
-                    MqClient.Publish(QueueNames<T>.In, message.ToBytes());
-                    return;
-                }
+            if (requeue)
+            {
+                message.RetryAttempts++;
+                this.TotalRetries++;
             }
 
-            MqClient.Publish(QueueNames<T>.Dlq, message.ToBytes());
+            message.Error = ex.ToResponseStatus();
+            MqClient.Nak(message, requeue: requeue, exception:ex);
         }
 
-        public void ProcessMessage(IMessageQueueClient mqClient, Message<T> message)
+        public void ProcessMessage(IMessageQueueClient mqClient, object mqResponse)
+        {
+            var message = mqClient.CreateMessage<T>(mqResponse);
+            ProcessMessage(mqClient, message);
+        }
+
+        public void ProcessMessage(IMessageQueueClient mqClient, IMessage<T> message)
         {
             this.MqClient = mqClient;
+            bool msgHandled = false;
 
             try
             {
                 var response = processMessageFn(message);
                 var responseEx = response as Exception;
+
+                if (responseEx == null)
+                {
+                    var responseStatus = response.GetResponseStatus();
+                    var isError = responseStatus != null && responseStatus.ErrorCode != null;
+                    if (isError)
+                    {
+                        responseEx = new MessagingException(responseStatus, response);
+                    }
+                }
+                
                 if (responseEx != null)
-                    throw responseEx;
+                { 
+                    TotalMessagesFailed++;
+
+                    if (message.ReplyTo != null)
+                    {
+                        var replyClient = ReplyClientFactory(message.ReplyTo);
+                        if (replyClient != null)
+                        {
+                            replyClient.SendOneWay(message.ReplyTo, response);
+                        }
+                        else
+                        {
+                            var responseDto = response.GetResponseDto();
+                            mqClient.Publish(message.ReplyTo, MessageFactory.Create(responseDto));
+                        }
+                        return;
+                    }
+
+                    msgHandled = true;
+                    processInExceptionFn(message, responseEx);
+                    return;
+                }
 
                 this.TotalMessagesProcessed++;
 
                 //If there's no response publish the request message to its OutQ
                 if (response == null)
                 {
-                    var messageOptions = (MessageOption)message.Options;
+                    var messageOptions = (MessageOption) message.Options;
                     if (messageOptions.Has(MessageOption.NotifyOneWay))
                     {
-                        mqClient.Notify(QueueNames<T>.Out, message.ToBytes());
+                        mqClient.Notify(QueueNames<T>.Out, message);
                     }
                 }
                 else
@@ -159,7 +192,8 @@ namespace ServiceStack.Messaging
                         var publishAllResponses = PublishResponsesWhitelist == null;
                         if (!publishAllResponses)
                         {
-                            var inWhitelist = PublishResponsesWhitelist.Any(publishResponse => responseType.GetOperationName() == publishResponse);
+                            var inWhitelist = PublishResponsesWhitelist.Any(
+                                publishResponse => responseType.GetOperationName() == publishResponse);
                             if (!inWhitelist) return;
                         }
 
@@ -167,7 +201,7 @@ namespace ServiceStack.Messaging
                         if (!responseType.IsUserType()) return;
                         mqReplyTo = new QueueNames(responseType).In;
                     }
-                    
+
                     var replyClient = ReplyClientFactory(mqReplyTo);
                     if (replyClient != null)
                     {
@@ -191,7 +225,7 @@ namespace ServiceStack.Messaging
                     //Otherwise send to our trusty response Queue (inc if replyClient fails)
                     var responseMessage = MessageFactory.Create(response);
                     responseMessage.ReplyId = message.Id;
-                    mqClient.Publish(mqReplyTo, responseMessage.ToBytes());
+                    mqClient.Publish(mqReplyTo, responseMessage);
                 }
             }
             catch (Exception ex)
@@ -199,12 +233,21 @@ namespace ServiceStack.Messaging
                 try
                 {
                     TotalMessagesFailed++;
+                    msgHandled = true;
                     processInExceptionFn(message, ex);
                 }
                 catch (Exception exHandlerEx)
                 {
                     Log.Error("Message exception handler threw an error", exHandlerEx);
                 }
+            }
+            finally
+            {
+                if (!msgHandled)
+                    mqClient.Ack(message);
+
+                this.TotalNormalMessagesReceived++;
+                LastMessageProcessed = DateTime.UtcNow;
             }
         }
 

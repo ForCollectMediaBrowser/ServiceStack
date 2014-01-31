@@ -171,22 +171,39 @@ namespace ServiceStack.Auth
         public AuthenticateResponse Authenticate(Authenticate request)
         {
             //Remove HTML Content-Type to avoid auth providers issuing browser re-directs
-            this.Request.ResponseContentType = MimeTypes.PlainText;
+            var hold = this.Request.ResponseContentType;
+            try
+            {
+                this.Request.ResponseContentType = MimeTypes.PlainText;
 
-            var provider = request.provider ?? AuthProviders[0].Provider;
-            var oAuthConfig = GetAuthProvider(provider);
-            if (oAuthConfig == null)
-                throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
+                if (request.RememberMe.HasValue)
+                {
+                    var opt = request.RememberMe.GetValueOrDefault(false)
+                        ? SessionOptions.Permanent
+                        : SessionOptions.Temporary;
 
-            if (request.provider == LogoutAction)
-                return oAuthConfig.Logout(this, request) as AuthenticateResponse;
+                    base.Request.AddSessionOptions(opt);
+                }
 
-            var result = Authenticate(request, provider, this.GetSession(), oAuthConfig);
-            var httpError = result as HttpError;
-            if (httpError != null)
-                throw httpError;
+                var provider = request.provider ?? AuthProviders[0].Provider;
+                var oAuthConfig = GetAuthProvider(provider);
+                if (oAuthConfig == null)
+                    throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
 
-            return result as AuthenticateResponse;
+                if (request.provider == LogoutAction)
+                    return oAuthConfig.Logout(this, request) as AuthenticateResponse;
+
+                var result = Authenticate(request, provider, this.GetSession(), oAuthConfig);
+                var httpError = result as HttpError;
+                if (httpError != null)
+                    throw httpError;
+
+                return result as AuthenticateResponse;
+            }
+            finally
+            {
+                this.Request.ResponseContentType = hold;
+            }
         }
 
         /// <summary>

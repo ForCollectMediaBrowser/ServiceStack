@@ -3,7 +3,6 @@ using System.Net;
 using System.Text;
 using ServiceStack.Text;
 using ServiceStack.Logging;
-using System.Security.Cryptography;
 
 #if NETFX_CORE
 using System.Net.Http.Headers;
@@ -165,12 +164,12 @@ namespace ServiceStack
         }
 #endif
 
-#if !NETFX_CORE && !SILVERLIGHT
+#if !(NETFX_CORE || SL5 || PCL)
         internal static string CalculateMD5Hash(string input)
         {
             // copied/pasted by adamfowleruk
             // step 1, calculate MD5 hash from input
-            MD5 md5 = System.Security.Cryptography.MD5.Create();
+            System.Security.Cryptography.MD5 md5 = System.Security.Cryptography.MD5.Create();
             byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(input);
             byte[] hash = md5.ComputeHash(inputBytes);
 
@@ -196,7 +195,6 @@ namespace ServiceStack
             return ret;
         }
 
-#if !SILVERLIGHT
         internal static void AddAuthInfo(this WebRequest client, string userName, string password, AuthenticationInfo authInfo)
         {
 
@@ -214,6 +212,9 @@ namespace ServiceStack
 
         internal static void AddDigestAuth(this WebRequest client, string userName, string password, AuthenticationInfo authInfo)
         {
+            //Silverlight MD5 impl at: http://archive.msdn.microsoft.com/SilverlightMD5
+
+#if !(SL5 || PCL)
             // by adamfowleruk
             // See Client Request at http://en.wikipedia.org/wiki/Digest_access_authentication
 
@@ -238,34 +239,48 @@ namespace ServiceStack
 
             client.Headers[HttpHeaders.Authorization] = header;
 
-        }
+#else 
+            throw new NotImplementedException();
 #endif
+        }
+
         /// <summary>
         /// Naming convention for the request's Response DTO
         /// </summary>
         public const string ResponseDtoSuffix = "Response";
 
-        public static string GetResponseDtoName(object request)
+        public static string GetResponseDtoName(Type requestType)
         {
-            var requestType = request.GetType();
-            return requestType != typeof(object)
-                ? requestType.FullName + ResponseDtoSuffix
-                : request.GetType().FullName + ResponseDtoSuffix;
+            return requestType.FullName + ResponseDtoSuffix;
+        }
+
+        public static Type GetErrorResponseDtoType<TResponse>(object request)
+        {
+            var hasResponseStatus = typeof(TResponse) is IHasResponseStatus
+                || typeof(TResponse).GetPropertyInfo("ResponseStatus") != null;
+
+            return hasResponseStatus ? typeof(TResponse) : GetErrorResponseDtoType(request);
         }
 
         public static Type GetErrorResponseDtoType(object request)
         {
-            if (request == null)
-                return typeof(ErrorResponse);
+            return request == null 
+                ? typeof(ErrorResponse) 
+                : GetErrorResponseDtoType(request.GetType());
+        }
+
+        public static Type GetErrorResponseDtoType(Type requestType)
+        {
+            if (requestType == null)
+                return typeof (ErrorResponse);
 
             //If a conventionally-named Response type exists use that regardless if it has ResponseStatus or not
-            var responseDtoType = AssemblyUtils.FindType(GetResponseDtoName(request));
+            var responseDtoType = AssemblyUtils.FindType(GetResponseDtoName(requestType));
             if (responseDtoType == null)
             {
-                var genericDef = request.GetType().GetTypeWithGenericTypeDefinitionOf(typeof(IReturn<>));
+                var genericDef = requestType.GetTypeWithGenericTypeDefinitionOf(typeof(IReturn<>));
                 if (genericDef != null)
                 {
-
                     var returnDtoType = genericDef.GenericTypeArguments()[0];
                     var hasResponseStatus = returnDtoType is IHasResponseStatus
                         || returnDtoType.GetPropertyInfo("ResponseStatus") != null;
@@ -280,6 +295,28 @@ namespace ServiceStack
 
             return responseDtoType ?? typeof(ErrorResponse);
         }
+
+        /// <summary>
+        /// Shortcut to get the ResponseStatus whether it's bare or inside a IHttpResult
+        /// </summary>
+        /// <param name="response"></param>
+        /// <returns></returns>
+        public static ResponseStatus GetResponseStatus(this object response)
+        {
+            if (response == null)
+                return null;
+
+            var hasResponseStatus = response as IHasResponseStatus;
+            if (hasResponseStatus != null)
+                return hasResponseStatus.ResponseStatus;
+
+            var propertyInfo = response.GetType().GetPropertyInfo("ResponseStatus");
+            if (propertyInfo == null)
+                return null;
+
+            return propertyInfo.GetProperty(response) as ResponseStatus;
+        }
+
     }
 
 }

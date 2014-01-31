@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.IO;
 using ServiceStack.Configuration;
 
@@ -69,11 +68,11 @@ namespace ServiceStack.Web
         /// </summary>
         Dictionary<string, object> Items { get; }
 
-        NameValueCollection Headers { get; }
+        INameValueCollection Headers { get; }
 
-        NameValueCollection QueryString { get; }
+        INameValueCollection QueryString { get; }
 
-        NameValueCollection FormData { get; }
+        INameValueCollection FormData { get; }
         /// <summary>
         /// Buffer the Request InputStream so it can be re-read
         /// </summary>
@@ -123,7 +122,3 @@ namespace ServiceStack.Web
         Uri UrlReferrer { get; }
     }
 }
-
-#if SILVERLIGHT
-public class NameValueCollection : Dictionary<string, string> {}
-#endif

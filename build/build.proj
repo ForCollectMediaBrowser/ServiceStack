@@ -93,19 +93,21 @@
       <ServiceStackFiles Include="$(SrcDir)/ServiceStack/bin/$(Configuration)/ServiceStack.xml"></ServiceStackFiles>
 
       <ServerFiles Include="$(SrcDir)/ServiceStack.Server/bin/$(Configuration)/ServiceStack.Server.*"></ServerFiles>
+      <RabbitMqFiles Include="$(SrcDir)/ServiceStack.RabbitMq/bin/$(Configuration)/ServiceStack.RabbitMq.*"></RabbitMqFiles>
 
       <RazorFiles Include="$(SrcDir)/ServiceStack.Razor/bin/$(Configuration)/ServiceStack.Razor.*"></RazorFiles>
       <RazorFiles Include="$(BuildSolutionDir)/lib/System.Web.Razor.dll"></RazorFiles>
       <RazorFiles Include="$(BuildSolutionDir)/lib/System.Web.Razor.xml"></RazorFiles>
 
+      <RazorFilesV4 Include="$(SrcDir)/ServiceStack.RazorV4/bin/$(Configuration)/ServiceStack.Razor.*"></RazorFilesV4>
+      <RazorFilesV4 Include="$(BuildSolutionDir)/lib/net40/System.Web.Razor.Unofficial.dll"></RazorFilesV4>
+
       <ClientFiles Include="$(SrcDir)/ServiceStack.Client/bin/$(Configuration)/ServiceStack.Client.*"></ClientFiles>
-      <ClientFilesSL5 Include="$(SrcDir)/ServiceStack.Client/bin/$(Configuration)/ServiceStack.Client.*"></ClientFilesSL5>
 
       <CommonFiles Include="$(SrcDir)/ServiceStack.Common/bin/$(Configuration)/ServiceStack.Common.*"></CommonFiles>
-      <CommonFilesSL5 Include="$(SrcDir)/ServiceStack.Common.SL5/bin/$(Configuration)/ServiceStack.Common.*"></CommonFilesSL5>
 
       <InterfacesFiles Include="$(SrcDir)/ServiceStack.Interfaces/bin/$(Configuration)/ServiceStack.Interfaces.*"></InterfacesFiles>
-      <InterfacesFilesSL5 Include="$(SrcDir)/ServiceStack.Interfaces.SL5/bin/$(Configuration)/ServiceStack.Interfaces.*"></InterfacesFilesSL5>
+      <InterfacesFilesSL5 Include="$(SrcDir)/ServiceStack.Interfaces/bin/SL5/ServiceStack.Interfaces.*"></InterfacesFilesSL5>
 
       <MvcFiles Include="$(SrcDir)/ServiceStack.Mvc/bin/$(Configuration)/ServiceStack.Mvc.*"></MvcFiles>
 
@@ -129,8 +131,6 @@
       <ProtoBufFiles Include="$(SrcDir)/ServiceStack.ProtoBuf/bin/$(Configuration)/ServiceStack.ProtoBuf.*"></ProtoBufFiles>
 
       <MsgPackFiles Include="$(SrcDir)/ServiceStack.MsgPack/bin/$(Configuration)/ServiceStack.MsgPack.*"></MsgPackFiles>
-      <MsgPackFiles Include="$(BuildSolutionDir)/lib/MsgPack.dll"></MsgPackFiles>
-      <MsgPackFiles Include="$(BuildSolutionDir)/lib/MsgPack.xml"></MsgPackFiles>
 
       <SwaggerFiles Include="$(SrcDir)/ServiceStack.Api.Swagger/bin/$(Configuration)/ServiceStack.Api.Swagger.*"></SwaggerFiles>
       
@@ -366,6 +366,14 @@
     <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Razor/lib/net45" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Razor/lib/net45')" />
     <Copy SourceFiles="%(RazorFiles.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Razor/lib/net45" />
 
+    <!-- ServiceStack.RazorV4 -->
+    <MSBuild Projects="$(SrcDir)/ServiceStack.RazorV4/ServiceStack.RazorV4.csproj"
+             Targets="Build"
+             Properties="Version=$(PackageVersion);Configuration=$(Configuration)" />
+
+    <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Razor/lib/net40" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Razor/lib/net40')" />
+    <Copy SourceFiles="%(RazorFilesV4.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Razor/lib/net40" />
+
     <Exec Command="&quot;$(NuGetPath)&quot; pack &quot;$(NuGetPackageDir)/ServiceStack.Razor/servicestack.razor.nuspec&quot; -OutputDirectory &quot;$(NuGetPackageDir)&quot; -Version $(PackageVersion) -Symbols"
             LogStandardErrorAsError="true" />
 
@@ -377,15 +385,6 @@
 
     <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Interfaces/lib/net40" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Interfaces/lib/net40')" />
     <Copy SourceFiles="%(InterfacesFiles.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Interfaces/lib/net40" />
-
-    <!-- TODO re-add SL5 after re-factor -->
-    <!-- Silverlight -->
-    <!--<MSBuild Projects="$(SrcDir)/ServiceStack.Interfaces.SL5/ServiceStack.Interfaces.SL5.csproj"
-               Targets="Build"
-               Properties="Version=$(PackageVersion);Configuration=$(Configuration)" />
-
-      <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Interfaces/lib/sl5" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Interfaces/lib/sl5')" />
-      <Copy SourceFiles="%(InterfacesFilesSL5.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Interfaces/lib/sl5" />-->
 
     <Exec Command="&quot;$(NuGetPath)&quot; pack &quot;$(NuGetPackageDir)/ServiceStack.Interfaces/servicestack.interfaces.nuspec&quot; -OutputDirectory &quot;$(NuGetPackageDir)&quot; -Version $(PackageVersion) -Symbols"
             LogStandardErrorAsError="true" />
@@ -399,15 +398,6 @@
     <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Client/lib/net40" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Client/lib/net40')" />
     <Copy SourceFiles="%(ClientFiles.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Client/lib/net40" />
 
-    <!-- TODO re-add SL5 after re-factor -->
-    <!-- Silverlight -->
-    <!--<MSBuild Projects="$(SrcDir)/ServiceStack.Client.SL5/ServiceStack.Client.SL5.csproj"
-               Targets="Build"
-               Properties="Version=$(PackageVersion);Configuration=$(Configuration)" />
-
-      <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Client/lib/sl5" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Client/lib/sl5')" />
-      <Copy SourceFiles="%(ClientFilesSL5.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Client/lib/sl5" />-->
-
     <Exec Command="&quot;$(NuGetPath)&quot; pack &quot;$(NuGetPackageDir)/ServiceStack.Client/servicestack.client.nuspec&quot; -OutputDirectory &quot;$(NuGetPackageDir)&quot; -Version $(PackageVersion) -Symbols"
             LogStandardErrorAsError="true" />
 
@@ -419,15 +409,6 @@
 
     <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Common/lib/net40" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Common/lib/net40')" />
     <Copy SourceFiles="%(CommonFiles.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Common/lib/net40" />
-
-    <!-- TODO re-add SL5 after re-factor -->
-    <!-- Silverlight -->
-      <!--<MSBuild Projects="$(SrcDir)/ServiceStack.Common.SL5/ServiceStack.Common.SL5.csproj"
-               Targets="Build"
-               Properties="Version=$(PackageVersion);Configuration=$(Configuration)" />
-
-      <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.Common/lib/sl5" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.Common/lib/sl5')" />
-      <Copy SourceFiles="%(CommonFilesSL5.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Common/lib/sl5" />-->
 
     <Exec Command="&quot;$(NuGetPath)&quot; pack &quot;$(NuGetPackageDir)/ServiceStack.Common/servicestack.common.nuspec&quot; -OutputDirectory &quot;$(NuGetPackageDir)&quot; -Version $(PackageVersion) -Symbols"
             LogStandardErrorAsError="true" />
@@ -442,6 +423,18 @@
     <Copy SourceFiles="%(ServerFiles.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.Server/lib/net40" />
 
     <Exec Command="&quot;$(NuGetPath)&quot; pack &quot;$(NuGetPackageDir)/ServiceStack.Server/servicestack.server.nuspec&quot; -OutputDirectory &quot;$(NuGetPackageDir)&quot; -Version $(PackageVersion) -Symbols"
+            LogStandardErrorAsError="true" />
+
+    <!-- ServiceStack.RabbitMq -->
+
+    <MSBuild Projects="$(SrcDir)/ServiceStack.RabbitMq/ServiceStack.RabbitMq.csproj"
+             Targets="Build"
+             Properties="Version=$(PackageVersion);Configuration=$(Configuration)" />
+
+    <MakeDir Directories="$(NuGetPackageDir)/ServiceStack.RabbitMq/lib/net40" Condition="!Exists('$(NuGetPackageDir)/ServiceStack.RabbitMq/lib/net40')" />
+    <Copy SourceFiles="%(RabbitMqFiles.Identity)" DestinationFolder="$(NuGetPackageDir)/ServiceStack.RabbitMq/lib/net40" />
+
+    <Exec Command="&quot;$(NuGetPath)&quot; pack &quot;$(NuGetPackageDir)/ServiceStack.RabbitMq/servicestack.rabbitmq.nuspec&quot; -OutputDirectory &quot;$(NuGetPackageDir)&quot; -Version $(PackageVersion) -Symbols"
             LogStandardErrorAsError="true" />
 
     <!-- ServiceStack -->

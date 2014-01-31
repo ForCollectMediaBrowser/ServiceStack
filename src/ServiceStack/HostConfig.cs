@@ -98,7 +98,7 @@ namespace ServiceStack
                 AllowPartialResponses = true,
                 AllowAclUrlReservation = true,
                 RedirectToDefaultDocuments = false,
-                StripApplicationVirtualPath = true,
+                StripApplicationVirtualPath = false,
                 ScanSkipPaths = new List<string> {
                     "/obj/", 
                     "/bin/",
@@ -385,9 +385,7 @@ namespace ServiceStack
             HandlerFactoryPath = locationPath ??
                 (String.IsNullOrEmpty(handlerPath) ? null : handlerPath);
 
-            MetadataRedirectPath = PathUtils.CombinePaths(
-                null != locationPath ? HandlerFactoryPath : handlerPath
-                , "metadata");
+            MetadataRedirectPath = "metadata";
         }
 
         private static string ExtractHandlerPathFromWebServerConfigurationXml(string rawXml)

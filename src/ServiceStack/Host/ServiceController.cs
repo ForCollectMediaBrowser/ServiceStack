@@ -111,17 +111,16 @@ namespace ServiceStack.Host
             try
             {
                 var isNService = typeof(IService).IsAssignableFrom(serviceType);
-                if (isNService)
-                {
-                    RegisterService(typeFactory, serviceType);
-                    appHost.Container.RegisterAutoWiredType(serviceType);
-                }
-
-                throw new ArgumentException("Type {0} is not a Web Service that inherits IService".Fmt(serviceType.FullName));
+                if (!isNService)
+                    throw new ArgumentException("Type {0} is not a Web Service that inherits IService".Fmt(serviceType.FullName));
+                
+                RegisterService(typeFactory, serviceType);
+                appHost.Container.RegisterAutoWiredType(serviceType);
             }
             catch (Exception ex)
             {
-                Log.Error(ex);
+                appHost.NotifyStartupException(ex);
+                Log.Error(ex.Message, ex);
             }
         }
 
@@ -432,17 +431,25 @@ namespace ServiceStack.Host
         /// <summary>
         /// Execute MQ
         /// </summary>
-        public object ExecuteMessage<T>(IMessage<T> mqMessage)
+        public object ExecuteMessage(IMessage mqMessage)
         {
-            return Execute(mqMessage.Body, new BasicRequest(mqMessage));
+            return ExecuteMessage(mqMessage, new BasicRequest(mqMessage));
         }
 
         /// <summary>
         /// Execute MQ with requestContext
         /// </summary>
-        public object ExecuteMessage<T>(IMessage<T> dto, IRequest requestContext)
+        public object ExecuteMessage(IMessage dto, IRequest req)
         {
-            return Execute(dto.Body, requestContext);
+            if (HostContext.ApplyMessageRequestFilters(req, req.Response, dto.Body))
+                return req.Response.Dto;
+
+            var response = Execute(dto.Body, req);
+
+            if (HostContext.ApplyMessageResponseFilters(req, req.Response, response))
+                return req.Response.Dto;
+
+            return response;
         }
 
         /// <summary>

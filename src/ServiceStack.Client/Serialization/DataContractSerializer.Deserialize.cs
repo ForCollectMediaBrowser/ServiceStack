@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Runtime.Serialization;
 using System.Xml;
+using ServiceStack.Text;
 
 namespace ServiceStack.Serialization
 {
@@ -13,21 +14,7 @@ namespace ServiceStack.Serialization
         {
             try
             {
-                var bytes = Encoding.UTF8.GetBytes(xml);
-
-#if MONOTOUCH				
-                using (var reader = XmlDictionaryReader.CreateTextReader(bytes, null))
-#elif SILVERLIGHT && !WINDOWS_PHONE
-                using (var reader = XmlDictionaryReader.CreateTextReader(bytes, XmlDictionaryReaderQuotas.Max))
-#elif WINDOWS_PHONE
-                using (var reader = XmlDictionaryReader.CreateBinaryReader(bytes, XmlDictionaryReaderQuotas.Max))
-#else
-                using (var reader = XmlDictionaryReader.CreateTextReader(bytes, this.quotas))
-#endif
-                {
-                    var serializer = new System.Runtime.Serialization.DataContractSerializer(type);
-                    return serializer.ReadObject(reader);
-                }
+                return XmlSerializer.DeserializeFromString(xml, type);
             }
             catch (Exception ex)
             {

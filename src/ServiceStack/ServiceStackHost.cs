@@ -10,6 +10,7 @@ using System.Net;
 using System.Reflection;
 using System.Web;
 using Funq;
+using ServiceStack.Auth;
 using ServiceStack.Caching;
 using ServiceStack.Configuration;
 using ServiceStack.Formats;
@@ -57,6 +58,8 @@ namespace ServiceStack
             PreRequestFilters = new List<Action<IRequest, IResponse>>();
             GlobalRequestFilters = new List<Action<IRequest, IResponse, object>>();
             GlobalResponseFilters = new List<Action<IRequest, IResponse, object>>();
+            GlobalMessageRequestFilters = new List<Action<IRequest, IResponse, object>>();
+            GlobalMessageResponseFilters = new List<Action<IRequest, IResponse, object>>();
             ViewEngines = new List<IViewEngine>();
             ServiceExceptionHandlers = new List<HandleServiceExceptionDelegate>();
             UncaughtExceptionHandlers = new List<HandleUncaughtExceptionDelegate>();
@@ -166,6 +169,10 @@ namespace ServiceStack
         public List<Action<IRequest, IResponse, object>> GlobalRequestFilters { get; set; }
 
         public List<Action<IRequest, IResponse, object>> GlobalResponseFilters { get; set; }
+
+        public List<Action<IRequest, IResponse, object>> GlobalMessageRequestFilters { get; private set; }
+        
+        public List<Action<IRequest, IResponse, object>> GlobalMessageResponseFilters { get; private set; }
 
         public List<IViewEngine> ViewEngines { get; set; }
 
@@ -354,6 +361,12 @@ namespace ServiceStack
             if (registeredMqService != null && registeredMqFactory == null)
             {
                 Container.Register(c => registeredMqService.MessageFactory);
+            }
+
+            if (Container.TryResolve<IUserAuthRepository>() != null
+                && Container.TryResolve<IAuthRepository>() == null)
+            {
+                Container.Register<IAuthRepository>(c => c.Resolve<IUserAuthRepository>());
             }
 
             ReadyAt = DateTime.UtcNow;

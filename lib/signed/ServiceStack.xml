@@ -106,6 +106,12 @@
             can decide whether or not they should redirect
             </summary>
         </member>
+        <member name="M:ServiceStack.HttpResult.TriggerEvent(System.Object,System.String,System.String)">
+            <summary>
+            Decorate the response with an additional client-side event to instruct participating 
+            smart clients (e.g. ajax) with hints to transparently invoke client-side functionality
+            </summary>
+        </member>
         <member name="M:ServiceStack.HttpResultExtensions.GetDto(System.Object)">
             <summary>
             Shortcut to get the ResponseDTO whether it's bare or inside a IHttpResult
@@ -129,13 +135,6 @@
             <summary>
             Alias of AsDto
             </summary>
-        </member>
-        <member name="M:ServiceStack.HttpResultExtensions.GetResponseStatus(System.Object)">
-            <summary>
-            Shortcut to get the ResponseStatus whether it's bare or inside a IHttpResult
-            </summary>
-            <param name="response"></param>
-            <returns></returns>
         </member>
         <member name="M:ServiceStack.HttpResultExtensions.IsErrorResponse(System.Object)">
             <summary>
@@ -4932,12 +4931,22 @@
         </member>
         <member name="P:ServiceStack.IAppHost.GlobalRequestFilters">
             <summary>
-            Add Request Filters
+            Add Request Filters for HTTP Requests
             </summary>
         </member>
         <member name="P:ServiceStack.IAppHost.GlobalResponseFilters">
             <summary>
-            Add Response Filters
+            Add Response Filters for HTTP Responses
+            </summary>
+        </member>
+        <member name="P:ServiceStack.IAppHost.GlobalMessageRequestFilters">
+            <summary>
+            Add Request Filters for MQ/TCP Requests
+            </summary>
+        </member>
+        <member name="P:ServiceStack.IAppHost.GlobalMessageResponseFilters">
+            <summary>
+            Add Response Filters for MQ/TCP Responses
             </summary>
         </member>
         <member name="P:ServiceStack.IAppHost.ViewEngines">
@@ -5451,12 +5460,12 @@
             Provide for quick lookups based on hashes that can be determined from a request url
             </summary>
         </member>
-        <member name="M:ServiceStack.Host.ServiceController.ExecuteMessage``1(ServiceStack.Messaging.IMessage{``0})">
+        <member name="M:ServiceStack.Host.ServiceController.ExecuteMessage(ServiceStack.Messaging.IMessage)">
             <summary>
             Execute MQ
             </summary>
         </member>
-        <member name="M:ServiceStack.Host.ServiceController.ExecuteMessage``1(ServiceStack.Messaging.IMessage{``0},ServiceStack.Web.IRequest)">
+        <member name="M:ServiceStack.Host.ServiceController.ExecuteMessage(ServiceStack.Messaging.IMessage,ServiceStack.Web.IRequest)">
             <summary>
             Execute MQ with requestContext
             </summary>

@@ -167,7 +167,8 @@ namespace ServiceStack.Host.HttpListener
         private string responseContentType;
         public string ResponseContentType
         {
-            get { return responseContentType ?? (responseContentType = this.GetResponseContentType()); }
+            get { return responseContentType 
+                ?? (responseContentType = this.GetResponseContentType()); }
             set
             {
                 this.responseContentType = value;
@@ -231,20 +232,22 @@ namespace ServiceStack.Host.HttpListener
             get { return request.UserAgent; }
         }
 
-        public NameValueCollection Headers
+        private NameValueCollectionWrapper headers;
+        public INameValueCollection Headers
         {
-            get { return request.Headers; }
+            get { return headers ?? (headers = new NameValueCollectionWrapper(request.Headers)); }
         }
 
-        private NameValueCollection queryString;
-        public NameValueCollection QueryString
+        private NameValueCollectionWrapper queryString;
+        public INameValueCollection QueryString
         {
-            get { return queryString ?? (queryString = HttpUtility.ParseQueryString(request.Url.Query)); }
+            get { return queryString ?? (queryString = new NameValueCollectionWrapper(HttpUtility.ParseQueryString(request.Url.Query))); }
         }
 
-        public NameValueCollection FormData
+        private NameValueCollectionWrapper formData;
+        public INameValueCollection FormData
         {
-            get { return this.Form; }
+            get { return formData ?? (formData = new NameValueCollectionWrapper(this.Form)); }
         }
 
         public bool IsLocal

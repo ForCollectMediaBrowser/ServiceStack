@@ -9,7 +9,7 @@ using System.Threading;
 
 namespace ServiceStack
 {
-    internal class AsyncState<TResponse> : IDisposable
+    public class AsyncState<TResponse> : IDisposable
     {
         private bool timedOut; // Pass the correct error back even on Async Calls
 
@@ -63,14 +63,10 @@ namespace ServiceStack
             if (this.OnSuccess == null)
                 return;
 
-#if SILVERLIGHT && !NETFX_CORE
-                if (this.HandleCallbackOnUIThread)
-                    System.Windows.Deployment.Current.Dispatcher.BeginInvoke(() => this.OnSuccess(response));
-                else
-                    this.OnSuccess(response);
-#else
-            this.OnSuccess(response);
-#endif
+            if (this.HandleCallbackOnUIThread)
+                PclExportClient.Instance.RunOnUiThread(() => this.OnSuccess(response));
+            else
+                this.OnSuccess(response);
         }
 
         public void HandleError(TResponse response, Exception ex)
@@ -86,14 +82,10 @@ namespace ServiceStack
                 toReturn = ex.CreateTimeoutException("The request timed out");
             }
 
-#if SILVERLIGHT && !NETFX_CORE
-                if (this.HandleCallbackOnUIThread)
-                    System.Windows.Deployment.Current.Dispatcher.BeginInvoke(() => this.OnError(response, toReturn));
-                else
-                    this.OnError(response, toReturn);
-#else
-            OnError(response, toReturn);
-#endif
+            if (this.HandleCallbackOnUIThread)
+                PclExportClient.Instance.RunOnUiThread(() => this.OnError(response, toReturn));
+            else
+                this.OnError(response, toReturn);
         }
 
         public void StartTimer(TimeSpan timeOut)

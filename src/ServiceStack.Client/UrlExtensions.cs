@@ -1,10 +1,15 @@
-﻿using ServiceStack.Text;
+﻿using System.Reflection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Text;
+
+#if SL5
+using ServiceStack.Text;
+#else
 using System.Collections.Concurrent;
+#endif
 
 namespace ServiceStack
 {
@@ -231,7 +236,7 @@ namespace ServiceStack
         private const char VariablePostfixChar = '}';
 
         private readonly IDictionary<string, RouteMember> queryProperties;
-        private readonly IDictionary<string, RouteMember> variablesMap = new Dictionary<string, RouteMember>(StringExtensions.InvariantComparerIgnoreCase());
+        private readonly IDictionary<string, RouteMember> variablesMap = new Dictionary<string, RouteMember>(PclExport.Instance.InvariantComparerIgnoreCase);
 
         public RestRoute(Type type, string path, string verbs, int priority)
         {
@@ -335,7 +340,7 @@ namespace ServiceStack
                 if (value == null)
                     continue;
 
-                var qsName = JsConfig.EmitLowercaseUnderscoreNames
+                var qsName = ServiceStack.Text.JsConfig.EmitLowercaseUnderscoreNames
                     ? queryProperty.Key.ToLowercaseUnderscore()
                     : queryProperty.Key;
 
@@ -351,7 +356,7 @@ namespace ServiceStack
 
         internal static IDictionary<string, RouteMember> GetQueryProperties(Type requestType)
         {
-            var result = new Dictionary<string, RouteMember>(StringExtensions.InvariantComparerIgnoreCase());
+            var result = new Dictionary<string, RouteMember>(PclExport.Instance.InvariantComparerIgnoreCase);
             var hasDataContract = requestType.HasAttribute<DataContractAttribute>();
 
             foreach (var propertyInfo in requestType.GetPublicProperties())
@@ -361,7 +366,7 @@ namespace ServiceStack
                 if (!propertyInfo.CanRead) continue;
                 if (hasDataContract)
                 {
-                    if (!propertyInfo.IsDefined(typeof(DataMemberAttribute), true)) continue;
+                    if (!propertyInfo.HasAttribute<DataMemberAttribute>()) continue;
 
                     var dataMember = propertyInfo.FirstAttribute<DataMemberAttribute>();
                     if (!string.IsNullOrEmpty(dataMember.Name))
@@ -376,7 +381,7 @@ namespace ServiceStack
                 };
             }
 
-            if (JsConfig.IncludePublicFields)
+            if (ServiceStack.Text.JsConfig.IncludePublicFields)
             {
                 foreach (var fieldInfo in requestType.GetPublicFields())
                 {

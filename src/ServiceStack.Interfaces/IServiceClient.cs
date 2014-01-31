@@ -1,8 +1,8 @@
 namespace ServiceStack
 {
 	public interface IServiceClient : IServiceClientAsync, IOneWayClient
-#if !(SILVERLIGHT || MONOTOUCH || ANDROIDINDIE)
-		, IRestClient, IReplyClient
+#if !(SL5 || __IOS__ || ANDROIDINDIE)
+, IRestClient, IReplyClient
 #endif
     {
 	}

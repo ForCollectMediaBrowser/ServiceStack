@@ -1,8 +1,10 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Runtime.Serialization;
 using Funq;
 using ServiceStack;
+using ServiceStack.Api.Swagger;
 using ServiceStack.Data;
 using ServiceStack.DataAnnotations;
 using ServiceStack.MsgPack;
@@ -20,6 +22,17 @@ namespace RazorRockstars.Web
         {
             Plugins.Add(new RazorFormat());
             Plugins.Add(new MsgPackFormat());
+            Plugins.Add(new SwaggerFeature());
+
+            typeof(Resources)
+                .AddAttributes(new RestrictAttribute { VisibilityTo = RequestAttributes.None });
+            typeof(ResourceRequest)
+                .AddAttributes(new RestrictAttribute { VisibilityTo = RequestAttributes.None });
+
+            var metadata = (MetadataFeature)Plugins.First(x => x is MetadataFeature);
+            metadata.IndexPageFilter = page => {
+                page.OperationNames.Sort((x,y) => y.CompareTo(x));
+            };
 
             container.Register<IDbConnectionFactory>(
                 new OrmLiteConnectionFactory(":memory:", SqliteDialect.Provider));
