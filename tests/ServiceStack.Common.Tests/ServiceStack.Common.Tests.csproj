@@ -10,7 +10,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>ServiceStack.Common.Tests</RootNamespace>
     <AssemblyName>ServiceStack.Common.Tests</AssemblyName>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <FileUpgradeFlags>
     </FileUpgradeFlags>
@@ -46,6 +46,7 @@
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
     <TreatWarningsAsErrors>False</TreatWarningsAsErrors>
     <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -56,6 +57,7 @@
     <WarningLevel>4</WarningLevel>
     <PlatformTarget>x86</PlatformTarget>
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'STATIC_ONLY NO_EXPRESSIONS|AnyCPU' ">
     <DebugSymbols>True</DebugSymbols>
@@ -67,6 +69,7 @@
     <WarningLevel>4</WarningLevel>
     <Optimize>False</Optimize>
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'MonoTouch|AnyCPU' ">
     <DebugSymbols>True</DebugSymbols>
@@ -78,6 +81,7 @@
     <WarningLevel>4</WarningLevel>
     <Optimize>False</Optimize>
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Signed|AnyCPU'">
     <OutputPath>bin\Signed\</OutputPath>
@@ -87,6 +91,7 @@
     <PlatformTarget>x86</PlatformTarget>
     <ErrorReport>prompt</ErrorReport>
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Moq">
@@ -143,20 +148,19 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ActionExecTests.cs" />
     <Compile Include="AttributeTests.cs" />
+    <Compile Include="CheckWebTests.cs" />
     <Compile Include="Configuration\AppSettingsTests.cs" />
     <Compile Include="CryptUtilTest.cs" />
     <Compile Include="EndpointHandlerBaseTests.cs" />
     <Compile Include="FluentValidation\ErrorCodeTests.cs" />
     <Compile Include="FormatTests.cs" />
     <Compile Include="FunqTests.cs" />
-    <Compile Include="MappingTests.cs" />
+    <Compile Include="ManageRolesTests.cs" />
     <Compile Include="MessagingTests.cs" />
-    <Compile Include="Messaging\InMemoryMqServerInAppHostTests.cs" />
-    <Compile Include="Messaging\RabbitMqServerInAppHostTests.cs" />
     <Compile Include="Messaging\RabbitMqTests.cs" />
-    <Compile Include="Messaging\MqServerInAppHostTests.cs" />
-    <Compile Include="Messaging\RedisMqServerInAppHostTests.cs" />
+    <Compile Include="Messaging\MqServerAppHostTests.cs" />
     <Compile Include="MockRestGatewayTests.cs" />
     <Compile Include="Models\ModelWithNamedCompositeIndex.cs" />
     <Compile Include="Models\DdnContentIngest.cs" />
@@ -216,6 +220,7 @@
     <Compile Include="ServiceClient.Web\ServiceClientBaseTester.cs" />
     <Compile Include="ServiceClient.Web\ServiceClientBaseTests.cs" />
     <Compile Include="ServiceClient.Web\UrlExtensionsTests.cs" />
+    <Compile Include="SessionExtensionTests.cs" />
     <Compile Include="StreamExtensionsTests.cs" />
     <Compile Include="StringExtensionTests.cs" />
     <Compile Include="ReflectionUtilTests.cs" />

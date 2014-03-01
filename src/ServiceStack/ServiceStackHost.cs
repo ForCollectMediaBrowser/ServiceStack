@@ -25,6 +25,7 @@ using ServiceStack.MiniProfiler.UI;
 using ServiceStack.Serialization;
 using ServiceStack.VirtualPath;
 using ServiceStack.Web;
+using ServiceStack.Redis;
 
 namespace ServiceStack
 {
@@ -237,7 +238,9 @@ namespace ServiceStack
             }
             else
             {
-                var errorMessage = string.Format("Error occured while Processing Request: {0}", ex.Message);
+                //Only add custom error messages to StatusDescription
+                var httpError = ex as IHttpError;
+                var errorMessage = httpError != null ? httpError.Message : null;
                 var statusCode = ex.ToStatusCode();
 
                 //httpRes.WriteToResponse always calls .Close in it's finally statement so 
@@ -352,7 +355,8 @@ namespace ServiceStack
             {
                 if (registeredCacheClient == null)
                 {
-                    Container.Register<ICacheClient>(new MemoryCacheClient());
+		    var redisClientsManager = Container.TryResolve<IRedisClientsManager>();
+		    Container.Register<ICacheClient>(redisClientsManager != null ? redisClientsManager.GetCacheClient() : new MemoryCacheClient());
                 }
             }
 
@@ -526,6 +530,11 @@ namespace ServiceStack
         public virtual object ExecuteService(object requestDto)
         {
             return ExecuteService(requestDto, RequestAttributes.None);
+        }
+
+        public virtual object ExecuteService(object requestDto, IRequest req)
+        {
+            return ServiceController.Execute(requestDto, req);
         }
 
         public virtual object ExecuteService(object requestDto, RequestAttributes requestAttributes)

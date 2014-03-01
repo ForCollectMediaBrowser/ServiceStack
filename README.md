@@ -120,9 +120,9 @@ That's all the application code required to create a simple REST web service.
 
 If you have [NuGet](http://nuget.org) installed, the easiest way to get started is to [install ServiceStack via NuGet](https://servicestack.net/download).
 
-_Commercial support is now available for ServiceStack, see https://servicestack.net/pricing for details_
+_Latest v4+ on NuGet is a commercial release with [free quotas](https://servicestack.net/download#free-quotas)._
 
-### [Docs and Downloads for v3](https://github.com/ServiceStackV3/ServiceStackV3)
+### [Docs and Downloads for older v3 BSD releases](https://github.com/ServiceStackV3/ServiceStackV3)
 
 ### Examples
 

@@ -174,7 +174,7 @@ namespace ServiceStack
                 listenForNextRequest.Set();
             }
 
-            log.InfoFormat("{0} Request : {1}", context.Request.UserHostAddress, context.Request.RawUrl);
+            log.DebugFormat("{0} Request : {1}", context.Request.UserHostAddress, context.Request.RawUrl);
 
             RaiseReceiveWebRequest(context);
 
@@ -194,10 +194,10 @@ namespace ServiceStack
                     {
                         task.RunSynchronously();
                     }
-                    else
-                    {
-                        task.Wait();
-                    }
+                    //else
+                    //{
+                    //    task.Wait();
+                    //}
                 }
                 catch (Exception ex)
                 {

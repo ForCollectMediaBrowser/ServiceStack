@@ -10,6 +10,7 @@ using System.Net;
 using System.Threading.Tasks;
 using System.Reflection;
 using ServiceStack.Logging;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 #if !(__IOS__ || SL5)
@@ -78,12 +79,15 @@ namespace ServiceStack
         public INameValueCollection Headers { get; private set; }
 
         public const string DefaultHttpMethod = "POST";
+        public static string DefaultUserAgent = "ServiceStack .NET Client " + Env.ServiceStackVersion;
 
         readonly AsyncServiceClient asyncClient;
 
         protected ServiceClientBase()
         {
             this.HttpMethod = DefaultHttpMethod;
+            this.Headers = PclExportClient.Instance.NewNameValueCollection();
+
             asyncClient = new AsyncServiceClient
             {
                 ContentType = ContentType,
@@ -92,11 +96,12 @@ namespace ServiceStack
                 UserName = this.UserName,
                 Password = this.Password,
                 RequestFilter = this.RequestFilter,
-                ResponseFilter = this.ResponseFilter
+                ResponseFilter = this.ResponseFilter,
+                Headers = this.Headers,
             };
             this.CookieContainer = new CookieContainer();
             this.StoreCookies = true; //leave
-            this.Headers = PclExportClient.Instance.NewNameValueCollection();
+            this.UserAgent = DefaultUserAgent;
 
             asyncClient.HandleCallbackOnUiThread = this.HandleCallbackOnUiThread = true;
             asyncClient.ShareCookiesWithBrowser = this.ShareCookiesWithBrowser = true;
@@ -191,6 +196,20 @@ namespace ServiceStack
 
         public string AsyncOneWayBaseUri { get; set; }
 
+        private string userAgent;
+        public string UserAgent
+        {
+            get
+            {
+                return userAgent;
+            }
+            set
+            {
+                userAgent = value;
+                asyncClient.UserAgent = value;
+            }
+        }
+
         private TimeSpan? timeout;
         public TimeSpan? Timeout
         {
@@ -222,7 +241,16 @@ namespace ServiceStack
         public abstract string ContentType { get; }
 
         public string HttpMethod { get; set; }
-      
+
+        /// <summary>
+        /// Whether to execute async callbacks on the same Synchronization Context it was called from.
+        /// </summary>
+        public bool CaptureSynchronizationContext
+        {
+            get { return asyncClient.CaptureSynchronizationContext; }
+            set { asyncClient.CaptureSynchronizationContext = value; }
+        }
+
         public bool HandleCallbackOnUiThread
         {
             get { return asyncClient.HandleCallbackOnUiThread; }
@@ -618,7 +646,8 @@ namespace ServiceStack
                 PclExport.Instance.Config(client,
                     allowAutoRedirect: AllowAutoRedirect,
                     timeout: this.Timeout,
-                    readWriteTimeout: ReadWriteTimeout);
+                    readWriteTimeout: ReadWriteTimeout,
+                    userAgent: UserAgent);
 
                 if (this.credentials != null) client.Credentials = this.credentials;
 
@@ -707,19 +736,36 @@ namespace ServiceStack
         public virtual void SendOneWay(object requestDto)
         {
             var requestUri = this.AsyncOneWayBaseUri.WithTrailingSlash() + requestDto.GetType().Name;
-            DownloadBytes(HttpMethods.Post, requestUri, requestDto);
+            SendOneWay(HttpMethods.Post, requestUri, requestDto);
         }
 
         public virtual void SendOneWay(string relativeOrAbsoluteUrl, object request)
         {
-            var requestUri = GetUrl(relativeOrAbsoluteUrl);
-            DownloadBytes(HttpMethods.Post, requestUri, request);
+            SendOneWay(HttpMethods.Post, relativeOrAbsoluteUrl, request);
         }
 
         public virtual void SendOneWay(string httpMethod, string relativeOrAbsoluteUrl, object requestDto)
         {
             var requestUri = GetUrl(relativeOrAbsoluteUrl);
-            DownloadBytes(httpMethod, requestUri, requestDto);
+            try
+            {
+                DownloadBytes(httpMethod, requestUri, requestDto);
+            }
+            catch (Exception ex)
+            {
+                HttpWebResponse response;
+
+                if (!HandleResponseException(
+                    ex,
+                    requestDto,
+                    requestUri,
+                    () => SendRequest(httpMethod, requestUri, requestDto),
+                    c => PclExport.Instance.GetResponse(c),
+                    out response))
+                {
+                    throw;
+                }
+            }
         }
 
         public virtual Task<TResponse> SendAsync<TResponse>(IReturn<TResponse> requestDto)
@@ -731,6 +777,11 @@ namespace ServiceStack
         {
             var requestUri = this.SyncReplyBaseUri.WithTrailingSlash() + requestDto.GetType().Name;
             return asyncClient.SendAsync<TResponse>(HttpMethods.Post, requestUri, requestDto);
+        }
+
+        public virtual Task<HttpWebResponse> SendAsync(IReturnVoid requestDto)
+        {
+            return SendAsync<HttpWebResponse>(requestDto);
         }
 
 
@@ -749,6 +800,12 @@ namespace ServiceStack
             return asyncClient.SendAsync<TResponse>(HttpMethods.Get, GetUrl(relativeOrAbsoluteUrl), null);
         }
 
+        public virtual Task<HttpWebResponse> GetAsync(IReturnVoid requestDto)
+        {
+            return GetAsync<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Get, Format));
+        }
+
+
         public virtual Task<TResponse> DeleteAsync<TResponse>(IReturn<TResponse> requestDto)
         {
             return DeleteAsync<TResponse>(requestDto.ToUrl(HttpMethods.Delete, Format));
@@ -762,6 +819,11 @@ namespace ServiceStack
         public virtual Task<TResponse> DeleteAsync<TResponse>(string relativeOrAbsoluteUrl)
         {
             return asyncClient.SendAsync<TResponse>(HttpMethods.Delete, GetUrl(relativeOrAbsoluteUrl), null);
+        }
+
+        public virtual Task<HttpWebResponse> DeleteAsync(IReturnVoid requestDto)
+        {
+            return DeleteAsync<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Delete, Format));
         }
 
 
@@ -780,6 +842,11 @@ namespace ServiceStack
             return asyncClient.SendAsync<TResponse>(HttpMethods.Post, GetUrl(relativeOrAbsoluteUrl), request);
         }
 
+        public virtual Task<HttpWebResponse> PostAsync(IReturnVoid requestDto)
+        {
+            return PostAsync<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Post, Format), requestDto);
+        }
+
 
         public virtual Task<TResponse> PutAsync<TResponse>(IReturn<TResponse> requestDto)
         {
@@ -794,6 +861,11 @@ namespace ServiceStack
         public virtual Task<TResponse> PutAsync<TResponse>(string relativeOrAbsoluteUrl, object request)
         {
             return asyncClient.SendAsync<TResponse>(HttpMethods.Put, GetUrl(relativeOrAbsoluteUrl), request);
+        }
+
+        public virtual Task<HttpWebResponse> PutAsync(IReturnVoid requestDto)
+        {
+            return PutAsync<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Put, Format), requestDto);
         }
 
 
@@ -812,6 +884,11 @@ namespace ServiceStack
             return asyncClient.SendAsync<TResponse>(HttpMethods.Patch, GetUrl(relativeOrAbsoluteUrl), request);
         }
 
+        public virtual Task<HttpWebResponse> PatchAsync(IReturnVoid requestDto)
+        {
+            return PatchAsync<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Patch, Format), requestDto);
+        }
+
 
         public virtual Task<TResponse> CustomMethodAsync<TResponse>(string httpVerb, IReturn<TResponse> requestDto)
         {
@@ -827,6 +904,14 @@ namespace ServiceStack
                 throw new NotSupportedException("Unknown HTTP Method is not supported: " + httpVerb);
 
             return asyncClient.SendAsync<TResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestDto);
+        }
+
+        public virtual Task<HttpWebResponse> CustomMethodAsync(string httpVerb, IReturnVoid requestDto)
+        {
+            if (!HttpMethods.HasVerb(httpVerb))
+                throw new NotSupportedException("Unknown HTTP Method is not supported: " + httpVerb);
+
+            return asyncClient.SendAsync<HttpWebResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestDto);
         }
 
 
@@ -865,19 +950,19 @@ namespace ServiceStack
         }
 
 
-        public virtual void Get(IReturnVoid requestDto)
+        public virtual HttpWebResponse Get(IReturnVoid requestDto)
         {
-            Get(requestDto.ToUrl(HttpMethods.Get, Format));
+            return Get<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Get, Format));
         }
 
-        public virtual void Get(object requestDto)
+        public virtual HttpWebResponse Get(object requestDto)
         {
-            Get(requestDto.ToUrl(HttpMethods.Get, Format));
+            return Get<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Get, Format));
         }
 
-        public virtual void Get(string relativeOrAbsoluteUrl)
+        public virtual HttpWebResponse Get(string relativeOrAbsoluteUrl)
         {
-            SendOneWay(HttpMethods.Get, relativeOrAbsoluteUrl, null);
+            return Get<HttpWebResponse>(relativeOrAbsoluteUrl);
         }
 
         public virtual TResponse Get<TResponse>(IReturn<TResponse> requestDto)
@@ -896,19 +981,19 @@ namespace ServiceStack
         }
 
 
-        public virtual void Delete(IReturnVoid requestDto)
+        public virtual HttpWebResponse Delete(IReturnVoid requestDto)
         {
-            Delete(requestDto.ToUrl(HttpMethods.Delete, Format));
+            return Delete(requestDto.ToUrl(HttpMethods.Delete, Format));
         }
 
-        public virtual void Delete(object requestDto)
+        public virtual HttpWebResponse Delete(object requestDto)
         {
-            Delete(requestDto.ToUrl(HttpMethods.Delete, Format));
+            return Delete(requestDto.ToUrl(HttpMethods.Delete, Format));
         }
 
-        public virtual void Delete(string relativeOrAbsoluteUrl)
+        public virtual HttpWebResponse Delete(string relativeOrAbsoluteUrl)
         {
-            SendOneWay(HttpMethods.Delete, relativeOrAbsoluteUrl, null);
+            return Delete<HttpWebResponse>(relativeOrAbsoluteUrl);
         }
 
         public virtual TResponse Delete<TResponse>(IReturn<TResponse> requestDto)
@@ -927,14 +1012,14 @@ namespace ServiceStack
         }
 
 
-        public virtual void Post(IReturnVoid requestDto)
+        public virtual HttpWebResponse Post(IReturnVoid requestDto)
         {
-            SendOneWay(HttpMethods.Post, requestDto.ToUrl(HttpMethods.Post, Format), requestDto);
+            return Post<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Post, Format), requestDto);
         }
 
-        public virtual void Post(object requestDto)
+        public virtual HttpWebResponse Post(object requestDto)
         {
-            SendOneWay(HttpMethods.Post, requestDto.ToUrl(HttpMethods.Post, Format), requestDto);
+            return Post<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Post, Format), requestDto);
         }
 
         public virtual TResponse Post<TResponse>(IReturn<TResponse> requestDto)
@@ -953,14 +1038,14 @@ namespace ServiceStack
         }
 
 
-        public virtual void Put(IReturnVoid requestDto)
+        public virtual HttpWebResponse Put(IReturnVoid requestDto)
         {
-            SendOneWay(HttpMethods.Put, requestDto.ToUrl(HttpMethods.Put, Format), requestDto);
+            return Put<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Put, Format), requestDto);
         }
 
-        public virtual void Put(object requestDto)
+        public virtual HttpWebResponse Put(object requestDto)
         {
-            SendOneWay(HttpMethods.Put, requestDto.ToUrl(HttpMethods.Put, Format), requestDto);
+            return Put<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Put, Format), requestDto);
         }
 
         public virtual TResponse Put<TResponse>(IReturn<TResponse> requestDto)
@@ -979,14 +1064,14 @@ namespace ServiceStack
         }
 
 
-        public virtual void Patch(IReturnVoid requestDto)
+        public virtual HttpWebResponse Patch(IReturnVoid requestDto)
         {
-            SendOneWay(HttpMethods.Patch, requestDto.ToUrl(HttpMethods.Patch, Format), requestDto);
+            return Patch<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Patch, Format), requestDto);
         }
 
-        public virtual void Patch(object requestDto)
+        public virtual HttpWebResponse Patch(object requestDto)
         {
-            SendOneWay(HttpMethods.Patch, requestDto.ToUrl(HttpMethods.Patch, Format), requestDto);
+            return Patch<HttpWebResponse>(requestDto.ToUrl(HttpMethods.Patch, Format), requestDto);
         }
 
         public virtual TResponse Patch<TResponse>(IReturn<TResponse> requestDto)
@@ -1005,22 +1090,22 @@ namespace ServiceStack
         }
 
 
-        public virtual void CustomMethod(string httpVerb, IReturnVoid requestDto)
+        public virtual HttpWebResponse CustomMethod(string httpVerb, IReturnVoid requestDto)
         {
-            CustomMethod(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
+            return CustomMethod<HttpWebResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
         }
 
-        public virtual void CustomMethod(string httpVerb, object requestDto)
+        public virtual HttpWebResponse CustomMethod(string httpVerb, object requestDto)
         {
-            CustomMethod(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
+            return CustomMethod<HttpWebResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
         }
 
-        public virtual void CustomMethod(string httpVerb, string relativeOrAbsoluteUrl, object requestDto)
+        public virtual HttpWebResponse CustomMethod(string httpVerb, string relativeOrAbsoluteUrl, object requestDto)
         {
             if (!HttpMethods.AllVerbs.Contains(httpVerb.ToUpper()))
                 throw new NotSupportedException("Unknown HTTP Method is not supported: " + httpVerb);
 
-            SendOneWay(httpVerb, relativeOrAbsoluteUrl, requestDto);
+            return Send<HttpWebResponse>(httpVerb, relativeOrAbsoluteUrl, requestDto);
         }
 
         public virtual TResponse CustomMethod<TResponse>(string httpVerb, IReturn<TResponse> requestDto)

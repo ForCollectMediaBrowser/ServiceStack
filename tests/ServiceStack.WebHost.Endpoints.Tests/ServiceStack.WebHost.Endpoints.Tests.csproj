@@ -146,6 +146,7 @@
     <Compile Include="AppHostListenerEchoRequestTests.cs" />
     <Compile Include="AppHostHttpListenerLongRunningBaseTests.cs" />
     <Compile Include="AppHostListenerBaseTests.cs" />
+    <Compile Include="AppSelfHostTests.cs" />
     <Compile Include="AsyncProgressTests.cs" />
     <Compile Include="AsyncRestClientTests.cs" />
     <Compile Include="AsyncServiceClientTests.cs" />
@@ -156,6 +157,8 @@
     <Compile Include="CachedServiceTests.cs" />
     <Compile Include="CompressionTests.cs" />
     <Compile Include="Config.cs" />
+    <Compile Include="HttpErrorSyncTests.cs" />
+    <Compile Include="RequestPipelineTests.cs" />
     <Compile Include="NestedServiceTests.cs" />
     <Compile Include="CorsFeaturePluginTests.cs" />
     <Compile Include="CustomServiceRunnerTests.cs" />
@@ -171,6 +174,7 @@
     <Compile Include="RuntimeAttributeTests.cs" />
     <Compile Include="ServiceClientsBuiltInResponseTests.cs" />
     <Compile Include="SessionTests.cs" />
+    <Compile Include="Support\Services\EchoService.cs" />
     <Compile Include="Support\Services\TestRestService.cs" />
     <Compile Include="Support\Types\KeyAttribute.cs" />
     <Compile Include="PartialContentResultTests.cs" />
@@ -211,7 +215,7 @@
     <Compile Include="CsvContentTypeFilterTests.cs" />
     <Compile Include="EndpointRestrictionTests.cs" />
     <Compile Include="FileUploadTests.cs" />
-    <Compile Include="HttpErrorTests.cs" />
+    <Compile Include="HttpErrorAsyncTests.cs" />
     <Compile Include="RequestContextTests.cs" />
     <Compile Include="RequestFiltersTests.cs" />
     <Compile Include="Support\DirectServiceClient.cs" />

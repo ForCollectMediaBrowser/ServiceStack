@@ -232,6 +232,7 @@
     <Compile Include="Tests\AsyncTaskTests.cs" />
     <Compile Include="Tests\CookieTests.cs" />
     <Compile Include="Tests\CustomHeadersTests.cs" />
+    <Compile Include="Tests\LoadTests.cs" />
     <Compile Include="Tests\ReqtestsTests.cs" />
     <Compile Include="Tests\ExceptionHandlingTests.cs" />
     <Compile Include="Tests\ProtoBufServiceTests.cs" />
@@ -242,7 +243,7 @@
     <Compile Include="Services\BatchWidgetValidationService.cs" />
     <Compile Include="Services\CachedMoviesService.cs" />
     <Compile Include="Tests\RawRequestTests.cs" />
-    <Compile Include="Tests\ManageRolesTests.cs" />
+    <Compile Include="Tests\AssertValidAccessTests.cs" />
     <Compile Include="Services\TestService.cs" />
     <Compile Include="Services\CustomerService.cs" />
     <Compile Include="Services\SessionService.cs" />
@@ -336,6 +337,7 @@
     <Content Include="App.config" />
     <None Include="Properties\DataSources\ServiceStack.ServiceInterface.ServiceModel.ResponseStatus.datasource" />
     <None Include="README.md" />
+    <Content Include="sample.pdf" />
     <None Include="webpage.forbidden" />
   </ItemGroup>
   <ItemGroup>

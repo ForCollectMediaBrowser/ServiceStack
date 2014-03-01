@@ -24,13 +24,15 @@ namespace ServiceStack.RabbitMq
 
         public bool UsePolling { get; set; }
 
-        public RabbitMqMessageFactory(string connectionString,
+        public RabbitMqMessageFactory(string connectionString = "localhost",
             string username = null, string password = null)
         {
             if (connectionString == null)
                 throw new ArgumentNullException("connectionString");
 
-            ConnectionFactory = new ConnectionFactory();
+            ConnectionFactory = new ConnectionFactory {
+                RequestedHeartbeat = 10,
+            };
 
             if (username != null)
                 ConnectionFactory.UserName = username;

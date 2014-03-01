@@ -53,6 +53,8 @@ namespace ServiceStack
 
         public bool StoreCookies { get; set; }
 
+        public INameValueCollection Headers { get; set; }
+
         public CookieContainer CookieContainer { get; set; }
 
         /// <summary>
@@ -88,6 +90,10 @@ namespace ServiceStack
         public StreamSerializerDelegate StreamSerializer { get; set; }
 
         public StreamDeserializerDelegate StreamDeserializer { get; set; }
+
+        public string UserAgent { get; set; }
+
+        public bool CaptureSynchronizationContext { get; set; }
 
         public bool HandleCallbackOnUiThread { get; set; }
 
@@ -155,6 +161,7 @@ namespace ServiceStack
                 Request = request,
                 OnSuccess = onSuccess,
                 OnError = onError,
+                UseSynchronizationContext = CaptureSynchronizationContext ? SynchronizationContext.Current : null,
                 HandleCallbackOnUIThread = HandleCallbackOnUiThread,
             };
             requestState.StartTimer(this.Timeout.GetValueOrDefault(DefaultTimeout));
@@ -179,6 +186,10 @@ namespace ServiceStack
             {
                 webRequest.Method = httpMethod;
             }
+
+            PclExportClient.Instance.AddHeader(webRequest, Headers);
+
+            PclExport.Instance.Config(webRequest, userAgent: UserAgent);
 
             if (this.Credentials != null) webRequest.Credentials = this.Credentials;
             if (this.AlwaysSendBasicAuthHeader) webRequest.AddBasicAuth(this.UserName, this.Password);
@@ -382,6 +393,7 @@ namespace ServiceStack
                 var serviceEx = new WebServiceException(errorResponse.StatusDescription)
                 {
                     StatusCode = (int)errorResponse.StatusCode,
+                    StatusDescription = errorResponse.StatusDescription,
                 };
 
                 try
@@ -406,6 +418,7 @@ namespace ServiceStack
                     Log.Debug(string.Format("WebException Reading Response Error: {0}", innerEx.Message), innerEx);
                     state.HandleError(default(TResponse), new WebServiceException(errorResponse.StatusDescription, innerEx) {
                         StatusCode = (int)errorResponse.StatusCode,
+                        StatusDescription = errorResponse.StatusDescription,
                     });
                 }
                 return;

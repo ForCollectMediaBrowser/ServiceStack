@@ -80,7 +80,8 @@
   <ItemGroup>
     <Compile Include="Benchmarks\RedisMqServerBenchmarks.cs" />
     <Compile Include="Benchmarks\RedisMqServerServerBenchmarks.cs" />
-    <Compile Include="Messaging\RabbitMqServerIntroTests.cs" />
+    <Compile Include="Messaging\MqNameTests.cs" />
+    <Compile Include="Messaging\MqServerIntroTests.cs" />
     <Compile Include="Messaging\RabbitMqServerTests.cs" />
     <Compile Include="Messaging\InMemoryTransientMessagingHostTests.cs" />
     <Compile Include="Messaging\MessageSerializationTests.cs" />
@@ -93,6 +94,7 @@
     <Compile Include="Messaging\RedisMqServerTests.cs" />
     <Compile Include="Messaging\RedisTransientMessagingHostTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\CacheClientTests.cs" />
     <Compile Include="Services\AlwaysFailService.cs" />
     <Compile Include="Services\GreetService.cs" />
     <Compile Include="Services\UnRetryableFail.cs" />
@@ -129,6 +131,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="Messaging.cd" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

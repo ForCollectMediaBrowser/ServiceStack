@@ -40,6 +40,11 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
+        public Task<HttpWebResponse> GetAsync(IReturnVoid requestDto)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task<TResponse> DeleteAsync<TResponse>(IReturn<TResponse> requestDto)
         {
             throw new NotImplementedException();
@@ -51,6 +56,11 @@ namespace ServiceStack
         }
 
         public Task<TResponse> DeleteAsync<TResponse>(string relativeOrAbsoluteUrl)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<HttpWebResponse> DeleteAsync(IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
@@ -70,6 +80,11 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
+        public Task<HttpWebResponse> PostAsync(IReturnVoid requestDto)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task<TResponse> PutAsync<TResponse>(IReturn<TResponse> requestDto)
         {
             throw new NotImplementedException();
@@ -85,12 +100,22 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
+        public Task<HttpWebResponse> PutAsync(IReturnVoid requestDto)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task<TResponse> CustomMethodAsync<TResponse>(string httpVerb, IReturn<TResponse> requestDto)
         {
             throw new NotImplementedException();
         }
 
         public Task<TResponse> CustomMethodAsync<TResponse>(string httpVerb, object requestDto)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<HttpWebResponse> CustomMethodAsync(string httpVerb, IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
@@ -184,12 +209,12 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
-        public void Get(IReturnVoid request)
+        public HttpWebResponse Get(IReturnVoid request)
         {
             throw new NotImplementedException();
         }
 
-        public void Get(object request)
+        public HttpWebResponse Get(object request)
         {
             throw new NotImplementedException();
         }
@@ -209,12 +234,12 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
-        public void Delete(IReturnVoid requestDto)
+        public HttpWebResponse Delete(IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
 
-        public void Delete(object requestDto)
+        public HttpWebResponse Delete(object requestDto)
         {
             throw new NotImplementedException();
         }
@@ -234,12 +259,12 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
-        public void Post(IReturnVoid requestDto)
+        public HttpWebResponse Post(IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
 
-        public void Post(object requestDto)
+        public HttpWebResponse Post(object requestDto)
         {
             throw new NotImplementedException();
         }
@@ -259,12 +284,12 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
-        public void Put(IReturnVoid requestDto)
+        public HttpWebResponse Put(IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
 
-        public void Put(object requestDto)
+        public HttpWebResponse Put(object requestDto)
         {
             throw new NotImplementedException();
         }
@@ -284,12 +309,12 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
-        public void Patch(IReturnVoid requestDto)
+        public HttpWebResponse Patch(IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
 
-        public void Patch(object requestDto)
+        public HttpWebResponse Patch(object requestDto)
         {
             throw new NotImplementedException();
         }
@@ -309,12 +334,12 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
-        public void CustomMethod(string httpVerb, IReturnVoid requestDto)
+        public HttpWebResponse CustomMethod(string httpVerb, IReturnVoid requestDto)
         {
             throw new NotImplementedException();
         }
 
-        public void CustomMethod(string httpVerb, object requestDto)
+        public HttpWebResponse CustomMethod(string httpVerb, object requestDto)
         {
             throw new NotImplementedException();
         }
