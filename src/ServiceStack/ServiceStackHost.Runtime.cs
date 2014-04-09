@@ -239,7 +239,7 @@ namespace ServiceStack
             httpRes.StatusDescription = errorStatusDescription;
 
             var handler = GetCustomErrorHandler(errorStatus)
-                ?? Config.GlobalHtmlErrorHttpHandler
+                ?? GlobalHtmlErrorHttpHandler
                 ?? GetNotFoundHandler();
 
             handler.ProcessRequest(httpReq, httpRes, httpReq.OperationName);
@@ -263,14 +263,6 @@ namespace ServiceStack
             if (CustomErrorHttpHandlers != null)
             {
                 CustomErrorHttpHandlers.TryGetValue(errorStatus, out httpHandler);
-            }
-
-            switch (errorStatus)
-            {
-                case HttpStatusCode.Forbidden:
-                    return httpHandler ?? new ForbiddenHttpHandler();
-                case HttpStatusCode.NotFound:
-                    return httpHandler ?? new NotFoundHttpHandler();
             }
 
             return httpHandler;

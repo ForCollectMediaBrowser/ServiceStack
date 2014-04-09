@@ -60,22 +60,22 @@ namespace ServiceStack.Host.HttpListener
             }
         }
 
-        public override ServiceStackHost Start(string listeningAtUrlBase)
+        public override ServiceStackHost Start(string urlBase)
         {
-            Start(listeningAtUrlBase, Listen);
+            Start(urlBase, Listen);
             return this;
         }
 
         /// <summary>
         /// Starts the Web Service
         /// </summary>
-        /// <param name="listeningAtUrlBase">
+        /// <param name="urlBase">
         /// A Uri that acts as the base that the server is listening on.
         /// Format should be: http://127.0.0.1:8080/ or http://127.0.0.1:8080/somevirtual/
         /// Note: the trailing slash is required! For more info see the
         /// HttpListener.Prefixes property on MSDN.
         /// </param>
-        protected void Start(string listeningAtUrlBase, WaitCallback listenCallback)
+        protected void Start(string urlBase, WaitCallback listenCallback)
         {
             // *** Already running - just leave it in place
             if (this.IsStarted)
@@ -84,24 +84,24 @@ namespace ServiceStack.Host.HttpListener
             if (this.Listener == null)
                 Listener = new System.Net.HttpListener();
 
-            HostContext.Config.HandlerFactoryPath = ListenerRequest.GetHandlerPathIfAny(listeningAtUrlBase);
+            HostContext.Config.HandlerFactoryPath = ListenerRequest.GetHandlerPathIfAny(urlBase);
 
-            Listener.Prefixes.Add(listeningAtUrlBase);
-
-            IsStarted = true;
+            Listener.Prefixes.Add(urlBase);
 
             try
             {
                 Listener.Start();
+                IsStarted = true;
             }
             catch (HttpListenerException ex)
             {
                 if (Config.AllowAclUrlReservation && ex.ErrorCode == 5 && registeredReservedUrl == null)
                 {
-                    registeredReservedUrl = AddUrlReservationToAcl(listeningAtUrlBase);
+                    registeredReservedUrl = AddUrlReservationToAcl(urlBase);
                     if (registeredReservedUrl != null)
                     {
-                        Start(listeningAtUrlBase, listenCallback);
+                        Listener = null;
+                        Start(urlBase, listenCallback);
                         return;
                     }
                 }
@@ -187,77 +187,37 @@ namespace ServiceStack.Host.HttpListener
 
             RaiseReceiveWebRequest(context);
 
+            InitTask(context);
+
+            //System.Diagnostics.Debug.WriteLine("End: " + requestNumber + " at " + DateTime.UtcNow);
+        }
+
+        public virtual void InitTask(HttpListenerContext context)
+        {
             try
             {
                 var task = this.ProcessRequestAsync(context);
-                task.ContinueWith(x => 
-                {
-                    if (x.IsFaulted)
-                        HandleError(x.Exception, context);
-                });
+                task.ContinueWith(x => HandleError(x.Exception, context), TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.AttachedToParent);
 
                 if (task.Status == TaskStatus.Created)
                 {
                     task.RunSynchronously();
                 }
-                //TODO: benchmark which is better
-                //else
-                //{
-                //    task.Wait();
-                //}
             }
             catch (Exception ex)
             {
                 HandleError(ex, context);
             }
-
-            //System.Diagnostics.Debug.WriteLine("End: " + requestNumber + " at " + DateTime.UtcNow);
         }
 
         public static void HandleError(Exception ex, HttpListenerContext context)
         {
             try
             {
+                var httpReq = CreateHttpRequest(context);
                 Log.Error("Error this.ProcessRequest(context): [{0}]: {1}".Fmt(ex.GetType().GetOperationName(), ex.Message), ex);
 
-                var errorResponse = new ErrorResponse
-                {
-                    ResponseStatus = new ResponseStatus
-                    {
-                        ErrorCode = ex.GetType().GetOperationName(),
-                        Message = ex.Message,
-                        StackTrace = ex.StackTrace,
-                    }
-                };
-
-                var operationName = context.Request.GetOperationName();
-                var httpReq = context.ToRequest(operationName);
-                var httpRes = httpReq.Response;
-                var contentType = httpReq.ResponseContentType;
-
-                var serializer = HostContext.ContentTypes.GetResponseSerializer(contentType);
-                if (serializer == null)
-                {
-                    contentType = HostContext.Config.DefaultContentType;
-                    serializer = HostContext.ContentTypes.GetResponseSerializer(contentType);
-                }
-
-                var httpError = ex as IHttpError;
-                if (httpError != null)
-                {
-                    httpRes.StatusCode = httpError.Status;
-                    httpRes.StatusDescription = httpError.StatusDescription;
-                }
-                else
-                {
-                    httpRes.StatusCode = 500;
-                }
-
-                httpRes.ContentType = contentType;
-
-                serializer(httpReq, errorResponse, httpRes);
-
-                httpRes.Close();
+                WriteUnhandledErrorResponse(httpReq, ex);
             }
             catch (Exception errorEx)
             {
@@ -265,6 +225,53 @@ namespace ServiceStack.Host.HttpListener
                             .Fmt(errorEx.GetType().GetOperationName(), errorEx.Message);
                 Log.Error(error, errorEx);
             }
+        }
+
+        public static void WriteUnhandledErrorResponse(IRequest httpReq, Exception ex)
+        {
+            var errorResponse = new ErrorResponse
+            {
+                ResponseStatus = new ResponseStatus
+                {
+                    ErrorCode = ex.GetType().GetOperationName(),
+                    Message = ex.Message,
+                    StackTrace = ex.StackTrace,
+                }
+            };
+
+            var httpRes = httpReq.Response;
+            var contentType = httpReq.ResponseContentType;
+
+            var serializer = HostContext.ContentTypes.GetResponseSerializer(contentType);
+            if (serializer == null)
+            {
+                contentType = HostContext.Config.DefaultContentType;
+                serializer = HostContext.ContentTypes.GetResponseSerializer(contentType);
+            }
+
+            var httpError = ex as IHttpError;
+            if (httpError != null)
+            {
+                httpRes.StatusCode = httpError.Status;
+                httpRes.StatusDescription = httpError.StatusDescription;
+            }
+            else
+            {
+                httpRes.StatusCode = 500;
+            }
+
+            httpRes.ContentType = contentType;
+
+            serializer(httpReq, errorResponse, httpRes);
+
+            httpRes.Close();
+        }
+
+        private static IHttpRequest CreateHttpRequest(HttpListenerContext context)
+        {
+            var operationName = context.Request.GetOperationName();
+            var httpReq = context.ToRequest(operationName);
+            return httpReq;
         }
 
         protected void RaiseReceiveWebRequest(HttpListenerContext context)

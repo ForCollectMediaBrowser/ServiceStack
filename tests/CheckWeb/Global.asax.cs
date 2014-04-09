@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Collections.Specialized;
+using System.Net;
+using System.Web;
+using Check.ServiceInterface;
 using Funq;
 using ServiceStack;
 using ServiceStack.Api.Swagger;
@@ -16,9 +19,7 @@ namespace CheckWeb
         /// Initializes a new instance of the <see cref="AppHost"/> class.
         /// </summary>
         public AppHost()
-            : base("ServiceStack Test (1) REST API", typeof(AppHost).Assembly)
-        {
-        }
+            : base("CheckWeb", typeof(ErrorsService).Assembly) {}
 
         /// <summary>
         /// Configure the Web Application host.
@@ -26,6 +27,8 @@ namespace CheckWeb
         /// <param name="container">The container.</param>
         public override void Configure(Container container)
         {
+            this.CustomErrorHttpHandlers[HttpStatusCode.NotFound] = null;
+
             // Change ServiceStack configuration
             this.SetConfig(new HostConfig
             {
@@ -34,7 +37,7 @@ namespace CheckWeb
                 // Set to return JSON if no request content type is defined
                 // e.g. text/html or application/json
                 DefaultContentType = MimeTypes.Json,
-#if DEBUG
+#if !DEBUG
                 // Show StackTraces in service responses during development
                 DebugMode = true,
 #endif
@@ -123,72 +126,6 @@ namespace CheckWeb
             // Enable support for Swagger API browser
             Plugins.Add(new SwaggerFeature());
             //Plugins.Add(new CorsFeature()); // Uncomment if the services to be available from external sites
-        }
-    }
-
-    /// <summary>
-    /// The Echo interface.
-    /// </summary>
-    public interface IEcho
-    {
-        /// <summary>
-        /// Gets or sets the sentence to echo.
-        /// </summary>
-        string Sentence { get; set; }
-    }
-
-    /// <summary>
-    /// The Echo.
-    /// </summary>
-    public class Echo : IEcho
-    {
-        /// <summary>
-        /// Gets or sets the sentence.
-        /// </summary>
-        public string Sentence { get; set; }
-    }
-
-    /// <summary>
-    /// The Echoes operation endpoints.
-    /// </summary>
-    [Api("Echoes a sentence")]
-    [Route("/echoes", "POST", Summary = @"Echoes a sentence.")]
-    public class Echoes : IReturn<Echo>
-    {
-        /// <summary>
-        /// Gets or sets the sentence to echo.
-        /// </summary>
-        [ApiMember(Name = "Sentence",
-            DataType = "string",
-            Description = "The sentence to echo.",
-            IsRequired = true,
-            ParameterType = "form")]
-        public string Sentence { get; set; }
-    }
-
-    public class AsyncTest : IReturn<Echo> {}
-
-    /// <summary>
-    /// The Echoes web service.
-    /// </summary>
-    public class EchoesService : Service
-    {
-        public IServiceClient Client { get; set; }
-
-        /// <summary>
-        /// GET echoes.
-        /// </summary>
-        /// <param name="request">The request.</param>
-        /// <returns>The <see cref="object"/>.</returns>
-        public object Post(Echoes request)
-        {
-            return new Echo { Sentence = request.Sentence };
-        }
-
-        public async Task<object> Any(AsyncTest request)
-        {
-            var response = await Client.PostAsync(new Echoes { Sentence = "Foo" });
-            return response;
         }
     }
 

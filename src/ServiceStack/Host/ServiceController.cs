@@ -179,7 +179,7 @@ namespace ServiceStack.Host
 
         public void RegisterRestPaths(Type requestType)
         {
-            var attrs = requestType.AllAttributes<RouteAttribute>();
+            var attrs = appHost.GetRouteAttributes(requestType);
             foreach (RouteAttribute attr in attrs)
             {
                 var restPath = new RestPath(requestType, attr.Path, attr.Verbs, attr.Summary, attr.Notes);
@@ -381,7 +381,15 @@ namespace ServiceStack.Host
             var requestAttrs = requestType.AllAttributes<RestrictAttribute>();
             if (requestAttrs.Length > 0)
             {
-                requestServiceAttrs.Add(requestType, requestAttrs[0]);
+                requestServiceAttrs[requestType] = requestAttrs[0];
+            }
+            else
+            {
+                var serviceAttrs = serviceType.AllAttributes<RestrictAttribute>();
+                if (serviceAttrs.Length > 0)
+                {
+                    requestServiceAttrs[requestType] = serviceAttrs[0];
+                }
             }
         }
 

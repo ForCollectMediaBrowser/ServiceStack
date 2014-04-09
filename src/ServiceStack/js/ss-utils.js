@@ -19,9 +19,14 @@
     };
     $.ss.clearAdjacentError = function() {
         $(this).removeClass("error");
-        $(this).prev(".help-block,.help-block").removeClass("error").html("");
-        $(this).next(".help-block,.help-block").removeClass("error").html("");
+        $(this).prev(".help-inline,.help-block").removeClass("error").html("");
+        $(this).next(".help-inline,.help-block").removeClass("error").html("");
     };
+    $.ss.todate = function(s) { return new Date(parseFloat(/Date\(([^)]+)\)/.exec(s)[1])); };
+    $.ss.todfmt = function (s) { return $.ss.dfmt($.ss.todate(s)); };
+    function pad(d) { return d < 10 ? '0' + d : d; };
+    $.ss.dfmt = function (d) { return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()); };
+    $.ss.dfmthm = function (d) { return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
 
     function splitCase(t) {
         return typeof t != 'string' ? t : t.replace( /([A-Z]|[0-9]+)/g , ' $1').replace( /_/g , ' ');
@@ -46,6 +51,23 @@
         });
         return to;
     }
+
+    $.fn.setFieldError = function(name, msg) {
+        $(this).applyErrors({
+            errors: [{
+                fieldName: name,
+                message: msg
+            }]
+        });
+    };
+
+    $.fn.serializeMap = function() {
+        var o = {};
+        $.each($(this).serializeArray(), function(i, e) {
+            o[e.name] = e.value;
+        });
+        return o;
+    };
 
     $.fn.applyErrors = function (status, opt) {
         this.clearErrors();
@@ -79,6 +101,11 @@
                 } else if ($next.hasClass("help-inline") || $next.hasClass("help-block")) {
                     fieldLabelMap[key] = $next;
                 }
+            });
+            this.find(".help-inline[data-for],.help-block[data-for]").each(function() {
+                var $el = $(this);
+                var key = $el.data("for").toLowerCase();
+                fieldLabelMap[key] = $el;
             });
             $.each(errors, function (i, error) {
                 var key = (error.fieldName || "").toLowerCase();
@@ -127,6 +154,10 @@
             f.submit(function (e) {
                 e.preventDefault();
                 f.clearErrors();
+                try {
+                    if (orig.validate && orig.validate.call(f) === false)
+                        return false;
+                } catch (e) { return false; }
                 f.addClass("loading");
                 var $disable = $(orig.onSubmitDisable || $.ss.onSubmitDisable, f);
                 $disable.attr("disabled", "disabled");
@@ -163,7 +194,7 @@
                         var evt = jq.getResponseHeader("X-Trigger");
                         if (evt) {
                             var pos = attr.indexOf(':');
-                            var cmd = pos >= 0 ? evt.substring(0, 1) : evt;
+                            var cmd = pos >= 0 ? evt.substring(0, pos) : evt;
                             var data = pos >= 0 ? evt.substring(pos + 1) : null;
                             f.trigger(cmd, data ? [data] : []);
                         }
@@ -188,21 +219,33 @@
             $el.find("[data-val]").each(function () {
                 $(this).val(map[$(this).data("val")] || "");
             });
+            $el.find("[data-src]").each(function () {
+                $(this).attr("src", map[$(this).data("src")] || "");
+            });
+            $el.find("[data-href]").each(function () {
+                $(this).attr("href", map[$(this).data("href")] || "");
+            });
         });
     };
     $.ss.__call = $.ss.__call || function (e) {
         var $el = $(e.target);
         var attr = $el.data(e.type) || $el.closest("[data-" + e.type + "]").data(e.type);
         if (!attr) return;
-        var pos = attr.indexOf(':');
+
+        var pos = attr.indexOf(':'), fn;
         if (pos >= 0) {
             var cmd = attr.substring(0, pos);
             var data = attr.substring(pos + 1);
             if (cmd == 'trigger') {
                 $el.trigger(data, [e.target]);
+            } else {
+                fn = $.ss.handlers[cmd];
+                if (fn) {
+                    fn.apply(e.target, data.split(','));
+                }
             }
         } else {
-            var fn = $.ss.handlers[attr];
+            fn = $.ss.handlers[attr];
             if (fn) {
                 fn.apply(e.target, [].splice(arguments));
             }

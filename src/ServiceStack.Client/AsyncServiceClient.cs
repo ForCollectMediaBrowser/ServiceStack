@@ -101,6 +101,8 @@ namespace ServiceStack
 
         public ProgressDelegate OnDownloadProgress { get; set; }
 
+        public ProgressDelegate OnUploadProgress { get; set; }
+
         public bool ShareCookiesWithBrowser { get; set; }
 
         internal Action CancelAsyncFn;
@@ -140,8 +142,7 @@ namespace ServiceStack
             if (httpMethod == null) throw new ArgumentNullException("httpMethod");
 
             var requestUri = absoluteUrl;
-            var httpGetOrDeleteOrHead = (httpMethod == "GET" || httpMethod == "DELETE" || httpMethod == "HEAD");
-            var hasQueryString = request != null && httpGetOrDeleteOrHead;
+            var hasQueryString = request != null && !httpMethod.HasRequestBody();
             if (hasQueryString)
             {
                 var queryString = QueryStringSerializer.SerializeToString(request);
@@ -172,7 +173,6 @@ namespace ServiceStack
         private void SendWebRequestAsync<TResponse>(string httpMethod, object request,
             AsyncState<TResponse> state, HttpWebRequest webRequest)
         {
-            var httpGetOrDeleteOrHead = (httpMethod == "GET" || httpMethod == "DELETE" || httpMethod == "HEAD");
             webRequest.Accept = string.Format("{0}, */*", ContentType);
 
             //Methods others than GET and POST are only supported by Client request creator, see
@@ -198,7 +198,7 @@ namespace ServiceStack
 
             try
             {
-                if (!httpGetOrDeleteOrHead && request != null)
+                if (httpMethod.HasRequestBody() && request != null)
                 {
                     webRequest.ContentType = ContentType;
                     webRequest.BeginGetRequestStream(RequestCallback<TResponse>, state);

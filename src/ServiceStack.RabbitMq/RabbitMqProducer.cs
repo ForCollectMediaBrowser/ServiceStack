@@ -7,7 +7,7 @@ using ServiceStack.Messaging;
 
 namespace ServiceStack.RabbitMq
 {
-    public class RabbitMqProducer : IMessageProducer
+    public class RabbitMqProducer : IMessageProducer, IOneWayClient
     {
         public static ILog Log = LogManager.GetLogger(typeof(RabbitMqProducer));
         protected readonly RabbitMqMessageFactory msgFactory;
@@ -71,21 +71,34 @@ namespace ServiceStack.RabbitMq
             Publish(queueName, message, QueueNames.Exchange);
         }
 
+        public void SendOneWay(object requestDto)
+        {
+            Publish(MessageFactory.Create(requestDto));
+        }
+
+        public void SendOneWay(string queueName, object requestDto)
+        {
+            Publish(queueName, MessageFactory.Create(requestDto));
+        }
+
         public void Publish(string queueName, IMessage message, string exchange)
         {
-            var props = Channel.CreateBasicProperties();
-            props.SetPersistent(true);
-            props.PopulateFromMessage(message);
-
-            var messageBytes = message.Body.ToJson().ToUtf8Bytes();
-
-            PublishMessage(exchange ?? QueueNames.Exchange,
-                routingKey: queueName,
-                basicProperties: props, body: messageBytes);
-
-            if (OnPublishedCallback != null)
+            using (__requestAccess())
             {
-                OnPublishedCallback();
+                var props = Channel.CreateBasicProperties();
+                props.SetPersistent(true);
+                props.PopulateFromMessage(message);
+
+                var messageBytes = message.Body.ToJson().ToUtf8Bytes();
+
+                PublishMessage(exchange ?? QueueNames.Exchange,
+                    routingKey: queueName,
+                    basicProperties: props, body: messageBytes);
+
+                if (OnPublishedCallback != null)
+                {
+                    OnPublishedCallback();
+                }
             }
         }
 
@@ -137,6 +150,22 @@ namespace ServiceStack.RabbitMq
                 }
                 throw;
             }
+        }
+
+        private class AccessToken
+        {
+            private string token;
+            internal static readonly AccessToken __accessToken =
+                new AccessToken("lUjBZNG56eE9yd3FQdVFSTy9qeGl5dlI5RmZwamc4U05udl000");
+            private AccessToken(string token)
+            {
+                this.token = token;
+            }
+        }
+
+        protected IDisposable __requestAccess()
+        {
+            return LicenseUtils.RequestAccess(AccessToken.__accessToken, LicenseFeature.Client, LicenseFeature.Text);
         }
 
         public virtual void Dispose()

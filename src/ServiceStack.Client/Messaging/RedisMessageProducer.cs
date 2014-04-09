@@ -8,7 +8,7 @@ using ServiceStack.Text;
 namespace ServiceStack.Messaging
 {
 	public class RedisMessageProducer
-		: IMessageProducer 
+		: IMessageProducer, IOneWayClient 
 	{
 		private readonly IRedisClientsManager clientsManager;
 		private readonly Action onPublishedCallback;
@@ -53,16 +53,45 @@ namespace ServiceStack.Messaging
             Publish(message.ToInQueueName(), message);
         }
 
+        public void SendOneWay(object requestDto)
+        {
+            Publish(MessageFactory.Create(requestDto));
+        }
+
+        public void SendOneWay(string queueName, object requestDto)
+        {
+            Publish(queueName, MessageFactory.Create(requestDto));
+        }
+
         public void Publish(string queueName, IMessage message)
         {
-            var messageBytes = message.ToBytes();
-            this.ReadWriteClient.LPush(queueName, messageBytes);
-            this.ReadWriteClient.Publish(QueueNames.TopicIn, queueName.ToUtf8Bytes());
-
-            if (onPublishedCallback != null)
+            using (__requestAccess())
             {
-                onPublishedCallback();
+                var messageBytes = message.ToBytes();
+                this.ReadWriteClient.LPush(queueName, messageBytes);
+                this.ReadWriteClient.Publish(QueueNames.TopicIn, queueName.ToUtf8Bytes());
+
+                if (onPublishedCallback != null)
+                {
+                    onPublishedCallback();
+                }
             }
+        }
+
+        private class AccessToken
+        {
+            private string token;
+            internal static readonly AccessToken __accessToken =
+                new AccessToken("lUjBZNG56eE9yd3FQdVFSTy9qeGl5dlI5RmZwamc4U05udl000");
+            private AccessToken(string token)
+            {
+                this.token = token;
+            }
+        }
+
+        protected IDisposable __requestAccess()
+        {
+            return LicenseUtils.RequestAccess(AccessToken.__accessToken, LicenseFeature.Client, LicenseFeature.Text);
         }
 
 		public void Dispose()

@@ -23,6 +23,7 @@ using ServiceStack.Messaging;
 using ServiceStack.Metadata;
 using ServiceStack.MiniProfiler.UI;
 using ServiceStack.Serialization;
+using ServiceStack.Text;
 using ServiceStack.VirtualPath;
 using ServiceStack.Web;
 using ServiceStack.Redis;
@@ -69,7 +70,10 @@ namespace ServiceStack
                  MiniProfilerHandler.MatchesRequest,
             };
             CatchAllHandlers = new List<HttpHandlerResolverDelegate>();
-            CustomErrorHttpHandlers = new Dictionary<HttpStatusCode, IServiceStackHandler>();
+            CustomErrorHttpHandlers = new Dictionary<HttpStatusCode, IServiceStackHandler> {
+                { HttpStatusCode.Forbidden, new ForbiddenHttpHandler() },
+                { HttpStatusCode.NotFound, new NotFoundHttpHandler() },
+            };
             StartUpErrors = new List<ResponseStatus>();
             PluginsLoaded = new List<string>();
             Plugins = new List<IPlugin> {
@@ -122,7 +126,7 @@ namespace ServiceStack
                 var pathProviders = new List<IVirtualPathProvider> {
                     new FileSystemVirtualPathProvider(this, Config.WebHostPhysicalPath)
                 };
-                pathProviders.AddRange(Config.EmbeddedResourceSources.Map(x => 
+                pathProviders.AddRange(Config.EmbeddedResourceSources.Map(x =>
                     new ResourceVirtualPathProvider(this, x)));
 
                 VirtualPathProvider = pathProviders.Count > 1
@@ -138,7 +142,7 @@ namespace ServiceStack
             return this;
         }
 
-        public virtual ServiceStackHost Start(string listeningAtUrlBase)
+        public virtual ServiceStackHost Start(string urlBase)
         {
             throw new NotImplementedException("Start(listeningAtUrlBase) is not supported by this AppHost");
         }
@@ -172,7 +176,7 @@ namespace ServiceStack
         public List<Action<IRequest, IResponse, object>> GlobalResponseFilters { get; set; }
 
         public List<Action<IRequest, IResponse, object>> GlobalMessageRequestFilters { get; private set; }
-        
+
         public List<Action<IRequest, IResponse, object>> GlobalMessageResponseFilters { get; private set; }
 
         public List<IViewEngine> ViewEngines { get; set; }
@@ -182,13 +186,15 @@ namespace ServiceStack
         public List<HandleUncaughtExceptionDelegate> UncaughtExceptionHandlers { get; set; }
 
         public List<Func<IHttpRequest, IHttpHandler>> RawHttpHandlers { get; set; }
-        
+
         public List<HttpHandlerResolverDelegate> CatchAllHandlers { get; set; }
+
+        public IServiceStackHandler GlobalHtmlErrorHttpHandler { get; set; }
 
         public Dictionary<HttpStatusCode, IServiceStackHandler> CustomErrorHttpHandlers { get; set; }
 
         public List<ResponseStatus> StartUpErrors { get; set; }
-        
+
         public List<string> PluginsLoaded { get; set; }
 
         public List<IPlugin> Plugins { get; set; }
@@ -283,9 +289,9 @@ namespace ServiceStack
             JsonDataContractSerializer.Instance.UseBcl = config.UseBclJsonSerializers;
             JsonDataContractSerializer.Instance.UseBcl = config.UseBclJsonSerializers;
         }
-        
+
         public virtual void OnBeforeInit()
-        {            
+        {
         }
 
         //After configure called
@@ -296,15 +302,30 @@ namespace ServiceStack
             if (config.EnableFeatures != Feature.All)
             {
                 if ((Feature.Xml & config.EnableFeatures) != Feature.Xml)
+                {
                     config.IgnoreFormatsInMetadata.Add("xml");
+                    Config.PreferredContentTypes.Remove(MimeTypes.Xml);
+                }
                 if ((Feature.Json & config.EnableFeatures) != Feature.Json)
+                {
                     config.IgnoreFormatsInMetadata.Add("json");
+                    Config.PreferredContentTypes.Remove(MimeTypes.Json);
+                }
                 if ((Feature.Jsv & config.EnableFeatures) != Feature.Jsv)
+                {
                     config.IgnoreFormatsInMetadata.Add("jsv");
+                    Config.PreferredContentTypes.Remove(MimeTypes.Jsv);
+                }
                 if ((Feature.Csv & config.EnableFeatures) != Feature.Csv)
+                {
                     config.IgnoreFormatsInMetadata.Add("csv");
+                    Config.PreferredContentTypes.Remove(MimeTypes.Csv);
+                }
                 if ((Feature.Html & config.EnableFeatures) != Feature.Html)
+                {
                     config.IgnoreFormatsInMetadata.Add("html");
+                    Config.PreferredContentTypes.Remove(MimeTypes.Html);
+                }
                 if ((Feature.Soap11 & config.EnableFeatures) != Feature.Soap11)
                     config.IgnoreFormatsInMetadata.Add("soap11");
                 if ((Feature.Soap12 & config.EnableFeatures) != Feature.Soap12)
@@ -355,8 +376,8 @@ namespace ServiceStack
             {
                 if (registeredCacheClient == null)
                 {
-		    var redisClientsManager = Container.TryResolve<IRedisClientsManager>();
-		    Container.Register<ICacheClient>(redisClientsManager != null ? redisClientsManager.GetCacheClient() : new MemoryCacheClient());
+                    var redisClientsManager = Container.TryResolve<IRedisClientsManager>();
+                    Container.Register<ICacheClient>(redisClientsManager != null ? redisClientsManager.GetCacheClient() : new MemoryCacheClient());
                 }
             }
 
@@ -404,6 +425,11 @@ namespace ServiceStack
             else if (String.IsNullOrEmpty(config.DefaultContentType))
                 config.DefaultContentType = MimeTypes.Json;
 
+            Config.PreferredContentTypes.Remove(Config.DefaultContentType);
+            Config.PreferredContentTypes.Insert(0, Config.DefaultContentType);
+
+            Config.PreferredContentTypesArray = Config.PreferredContentTypes.ToArray();
+
             ServiceController.AfterInit();
         }
 
@@ -444,7 +470,8 @@ namespace ServiceStack
 
         public virtual void OnEndRequest()
         {
-            foreach (var item in RequestContext.Instance.Items.Values)
+            var disposables = RequestContext.Instance.Items.Values;
+            foreach (var item in disposables)
             {
                 Release(item);
             }
@@ -507,7 +534,7 @@ namespace ServiceStack
 
         public virtual IVirtualNode ResolveVirtualNode(string virtualPath, IRequest httpReq)
         {
-            return (IVirtualNode) ResolveVirtualFile(virtualPath, httpReq) 
+            return (IVirtualNode)ResolveVirtualFile(virtualPath, httpReq)
                 ?? ResolveVirtualDirectory(virtualPath, httpReq);
         }
 
@@ -553,6 +580,11 @@ namespace ServiceStack
                     this.Routes.Add(reqAttr.RequestType, atRestPath, null);
                 }
             }
+        }
+
+        public virtual RouteAttribute[] GetRouteAttributes(Type requestType)
+        {
+            return requestType.AllAttributes<RouteAttribute>();
         }
 
         public virtual void Dispose()

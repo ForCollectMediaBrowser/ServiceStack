@@ -18,6 +18,13 @@ namespace ServiceStack
     public abstract class AppHostHttpListenerBase
         : HttpListenerBase
     {
+        public static int ThreadsPerProcessor = 16;
+
+        public static int CalculatePoolSize()
+        {
+            return Environment.ProcessorCount * ThreadsPerProcessor;
+        }
+
         public string HandlerPath { get; set; }
 
         protected AppHostHttpListenerBase(string serviceName, params Assembly[] assembliesWithServices)
@@ -50,7 +57,8 @@ namespace ServiceStack
                 }
 
                 var task = serviceStackHandler.ProcessRequestAsync(httpReq, httpRes, operationName);                
-                task.ContinueWith(x => httpRes.Close());
+                task.ContinueWith(x => httpRes.Close(), TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.AttachedToParent);
+                //Matches Exceptions handled in HttpListenerBase.InitTask()
 
                 return task;
             }

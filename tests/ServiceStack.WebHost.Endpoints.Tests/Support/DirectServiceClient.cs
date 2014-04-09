@@ -26,9 +26,9 @@ namespace ServiceStack.WebHost.Endpoints.Tests.Support
             ServiceController.Execute(requestDto);
         }
 
-        public void SendOneWay(string relativeOrAbsoluteUrl, object request)
+        public void SendOneWay(string relativeOrAbsoluteUri, object requestDto)
         {
-            ServiceController.Execute(request);
+            ServiceController.Execute(requestDto);
         }
 
         private bool ApplyRequestFilters<TResponse>(object request)
@@ -449,12 +449,12 @@ namespace ServiceStack.WebHost.Endpoints.Tests.Support
         }
 
         public void Dispose() { }
-        public TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request)
+        public TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request, string fieldName = "upload")
         {
             throw new NotImplementedException();
         }
 
-        public TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, object request)
+        public TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, object request, string fieldName = "upload")
         {
             throw new NotImplementedException();
         }

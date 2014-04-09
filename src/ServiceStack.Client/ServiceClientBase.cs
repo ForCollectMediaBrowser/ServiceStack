@@ -10,6 +10,7 @@ using System.Net;
 using System.Threading.Tasks;
 using System.Reflection;
 using ServiceStack.Logging;
+using ServiceStack.Messaging;
 using ServiceStack.Text;
 using ServiceStack.Web;
 
@@ -29,7 +30,7 @@ namespace ServiceStack
      * Need to provide async request options
      * http://msdn.microsoft.com/en-us/library/86wf6409(VS.71).aspx
      */
-    public abstract class ServiceClientBase : IServiceClient
+    public abstract class ServiceClientBase : IServiceClient, IMessageProducer
     {
         private static readonly ILog log = LogManager.GetLogger(typeof(ServiceClientBase));
 
@@ -267,6 +268,12 @@ namespace ServiceStack
         {
             get { return asyncClient.OnDownloadProgress; }
             set { asyncClient.OnDownloadProgress = value; }
+        }
+
+        public ProgressDelegate OnUploadProgress
+        {
+            get { return asyncClient.OnUploadProgress; }
+            set { asyncClient.OnUploadProgress = value; }
         }
 
         private bool shareCookiesWithBrowser;
@@ -621,9 +628,7 @@ namespace ServiceStack
             if (httpMethod == null)
                 throw new ArgumentNullException("httpMethod");
 
-            var httpMethodGetOrHead = httpMethod == HttpMethods.Get || httpMethod == HttpMethods.Head;
-
-            if (httpMethodGetOrHead && request != null)
+            if (!httpMethod.HasRequestBody() && request != null)
             {
                 var queryString = QueryStringSerializer.SerializeToString(request);
                 if (!string.IsNullOrEmpty(queryString))
@@ -673,13 +678,12 @@ namespace ServiceStack
 
                 ApplyWebRequestFilters(client);
 
-                if (httpMethod != HttpMethods.Get
-                    && httpMethod != HttpMethods.Delete
-                    && httpMethod != HttpMethods.Head)
+                if (httpMethod.HasRequestBody())
                 {
                     client.ContentType = ContentType;
 
-                    if (sendRequestAction != null) sendRequestAction(client);
+                    if (sendRequestAction != null) 
+                        sendRequestAction(client);
                 }
             }
             catch (AuthenticationException ex)
@@ -731,6 +735,31 @@ namespace ServiceStack
                 using (var stream = response.GetResponseStream())
                     return stream.ReadFully();
             }
+        }
+
+        public void Publish<T>(T requestDto)
+        {
+            Post(requestDto);
+        }
+
+        public void Publish<T>(IMessage<T> message)
+        {
+            var requestDto = message.GetBody();
+
+            if (message.CreatedDate != default(DateTime))
+                Headers.Set("X-CreatedDate", message.CreatedDate.ToJsv());
+            if (message.Priority != default(int))
+                Headers.Set("X-Priority", message.Priority.ToString());
+            if (message.RetryAttempts != default(int))
+                Headers.Set("X-RetryAttempts", message.RetryAttempts.ToString());
+            if (message.ReplyId != null)
+                Headers.Set("X-ReplyId", message.ReplyId.Value.ToString());
+            if (message.ReplyTo != null)
+                Headers.Set("X-ReplyTo", message.ReplyTo);
+            if (message.Tag != null)
+                Headers.Set("X-Tag", message.Tag);
+
+            Post(requestDto);
         }
 
         public virtual void SendOneWay(object requestDto)
@@ -895,7 +924,8 @@ namespace ServiceStack
             if (!HttpMethods.HasVerb(httpVerb))
                 throw new NotSupportedException("Unknown HTTP Method is not supported: " + httpVerb);
 
-            return asyncClient.SendAsync<TResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestDto);
+            var requestBody = httpVerb.HasRequestBody() ? requestDto : null;
+            return asyncClient.SendAsync<TResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestBody);
         }
 
         public virtual Task<TResponse> CustomMethodAsync<TResponse>(string httpVerb, object requestDto)
@@ -903,7 +933,8 @@ namespace ServiceStack
             if (!HttpMethods.HasVerb(httpVerb))
                 throw new NotSupportedException("Unknown HTTP Method is not supported: " + httpVerb);
 
-            return asyncClient.SendAsync<TResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestDto);
+            var requestBody = httpVerb.HasRequestBody() ? requestDto : null;
+            return asyncClient.SendAsync<TResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestBody);
         }
 
         public virtual Task<HttpWebResponse> CustomMethodAsync(string httpVerb, IReturnVoid requestDto)
@@ -911,7 +942,8 @@ namespace ServiceStack
             if (!HttpMethods.HasVerb(httpVerb))
                 throw new NotSupportedException("Unknown HTTP Method is not supported: " + httpVerb);
 
-            return asyncClient.SendAsync<HttpWebResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestDto);
+            var requestBody = httpVerb.HasRequestBody() ? requestDto : null;
+            return asyncClient.SendAsync<HttpWebResponse>(httpVerb, GetUrl(requestDto.ToUrl(httpVerb, Format)), requestBody);
         }
 
 
@@ -1097,7 +1129,8 @@ namespace ServiceStack
 
         public virtual HttpWebResponse CustomMethod(string httpVerb, object requestDto)
         {
-            return CustomMethod<HttpWebResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
+            var requestBody = httpVerb.HasRequestBody() ? requestDto : null;
+            return CustomMethod<HttpWebResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestBody);
         }
 
         public virtual HttpWebResponse CustomMethod(string httpVerb, string relativeOrAbsoluteUrl, object requestDto)
@@ -1110,12 +1143,14 @@ namespace ServiceStack
 
         public virtual TResponse CustomMethod<TResponse>(string httpVerb, IReturn<TResponse> requestDto)
         {
-            return CustomMethod<TResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
+            var requestBody = httpVerb.HasRequestBody() ? requestDto : null;
+            return CustomMethod<TResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestBody);
         }
 
         public virtual TResponse CustomMethod<TResponse>(string httpVerb, object requestDto)
         {
-            return CustomMethod<TResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestDto);
+            var requestBody = httpVerb.HasRequestBody() ? requestDto : null;
+            return CustomMethod<TResponse>(httpVerb, requestDto.ToUrl(httpVerb, Format), requestBody);
         }
 
         public virtual TResponse CustomMethod<TResponse>(string httpVerb, string relativeOrAbsoluteUrl, object requestDto = null)
@@ -1143,16 +1178,16 @@ namespace ServiceStack
         }
 
 #if !PCL
-        public virtual TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request)
+        public virtual TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request, string fieldName = "upload")
         {
             using (FileStream fileStream = fileToUpload.OpenRead())
             {
-                return PostFileWithRequest<TResponse>(relativeOrAbsoluteUrl, fileStream, fileToUpload.Name, request);
+                return PostFileWithRequest<TResponse>(relativeOrAbsoluteUrl, fileStream, fileToUpload.Name, request, fieldName);
             }
         }
 #endif
 
-        public virtual TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, object request)
+        public virtual TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, object request, string fieldName = "upload")
         {
             var requestUri = GetUrl(relativeOrAbsoluteUrl);
             var currentStreamPosition = fileToUpload.Position;
@@ -1179,12 +1214,19 @@ namespace ServiceStack
                     }
 
                     outputStream.Write(boundary + newLine);
-                    outputStream.Write("Content-Disposition: form-data;name=\"{0}\";filename=\"{1}\"{2}{3}".FormatWith("upload", fileName, newLine, newLine));
+                    outputStream.Write("Content-Disposition: form-data;name=\"{0}\";filename=\"{1}\"{2}{3}".FormatWith(fieldName, fileName, newLine, newLine));
                     var buffer = new byte[4096];
                     int byteCount;
+                    int bytesWritten = 0;
                     while ((byteCount = fileToUpload.Read(buffer, 0, 4096)) > 0)
                     {
                         outputStream.Write(buffer, 0, byteCount);
+
+                        if (OnUploadProgress != null)
+                        {
+                            bytesWritten += byteCount;
+                            OnUploadProgress(bytesWritten, fileToUpload.Length);
+                        }
                     }
                     outputStream.Write(newLine);
                     outputStream.Write(boundary + "--");

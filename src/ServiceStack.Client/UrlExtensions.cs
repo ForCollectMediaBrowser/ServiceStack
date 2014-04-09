@@ -44,22 +44,42 @@ namespace ServiceStack
 
         public static string ToGetUrl(this object requestDto)
         {
-            return requestDto.ToUrl(HttpMethods.Get);
+            return requestDto.ToUrl(HttpMethods.Get, formatFallbackToPredefinedRoute:"json");
         }
 
         public static string ToPostUrl(this object requestDto)
         {
-            return requestDto.ToUrl(HttpMethods.Post);
+            return requestDto.ToUrl(HttpMethods.Post, formatFallbackToPredefinedRoute: "json");
         }
 
         public static string ToPutUrl(this object requestDto)
         {
-            return requestDto.ToUrl(HttpMethods.Put);
+            return requestDto.ToUrl(HttpMethods.Put, formatFallbackToPredefinedRoute: "json");
         }
 
         public static string ToDeleteUrl(this object requestDto)
         {
-            return requestDto.ToUrl(HttpMethods.Delete);
+            return requestDto.ToUrl(HttpMethods.Delete, formatFallbackToPredefinedRoute:"json");
+        }
+
+        public static string ToOneWayUrl(this object requestDto, string format = "json")
+        {
+            var requestType = requestDto.GetType();
+            var predefinedRoute = "/{0}/oneway/{1}".Fmt(format, requestType.GetOperationName());
+            var queryProperties = RestRoute.GetQueryProperties(requestDto.GetType());
+            predefinedRoute += "?" + RestRoute.GetQueryString(requestDto, queryProperties);
+
+            return predefinedRoute;
+        }
+
+        public static string ToReplyUrl(this object requestDto, string format = "json")
+        {
+            var requestType = requestDto.GetType();
+            var predefinedRoute = "/{0}/reply/{1}".Fmt(format, requestType.GetOperationName());
+            var queryProperties = RestRoute.GetQueryProperties(requestDto.GetType());
+            predefinedRoute += "?" + RestRoute.GetQueryString(requestDto, queryProperties);
+
+            return predefinedRoute;
         }
 
         public static string GetOperationName(this Type type)
@@ -120,7 +140,7 @@ namespace ServiceStack
             }
 
             var url = matchingRoute.Uri;
-            if (httpMethod == HttpMethods.Get || httpMethod == HttpMethods.Delete || httpMethod == HttpMethods.Head)
+            if (!httpMethod.HasRequestBody())
             {
                 var queryParams = matchingRoute.Route.FormatQueryParameters(requestDto);
                 if (!String.IsNullOrEmpty(queryParams))
@@ -130,6 +150,20 @@ namespace ServiceStack
             }
 
             return url;
+        }
+
+        public static bool HasRequestBody(this string httpMethod)
+        {
+            switch (httpMethod)
+            {
+                case HttpMethods.Get:
+                case HttpMethods.Delete:
+                case HttpMethods.Head:
+                case HttpMethods.Options:
+                    return false;
+            }
+
+            return true;
         }
 
         private static List<RestRoute> GetRoutesForType(Type requestType)

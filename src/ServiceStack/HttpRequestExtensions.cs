@@ -73,7 +73,7 @@ namespace ServiceStack
 		{
 			var resolvedPathInfo = httpReq.PathInfo;
 
-			var pos = httpReq.RawUrl.IndexOf(resolvedPathInfo, StringComparison.InvariantCultureIgnoreCase);
+			var pos = httpReq.RawUrl.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
 			if (pos == -1)
 				throw new ArgumentException(
 					String.Format("PathInfo '{0}' is not in Url '{1}'", resolvedPathInfo, httpReq.RawUrl));
@@ -92,7 +92,7 @@ namespace ServiceStack
 
 			var pos = resolvedPathInfo == String.Empty
 				? httpReq.AbsoluteUri.Length
-				: httpReq.AbsoluteUri.IndexOf(resolvedPathInfo, StringComparison.InvariantCultureIgnoreCase);
+				: httpReq.AbsoluteUri.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
 
 			if (pos == -1)
 				throw new ArgumentException(
@@ -154,9 +154,8 @@ namespace ServiceStack
         {
             var appPath = httpReq.ApplicationPath.SanitizedVirtualPath();
             var baseUrl = httpReq.Url.GetLeftPart(UriPartial.Authority);
-            baseUrl = baseUrl.CombineWith(HostContext.Config.HandlerFactoryPath);
-            var appUrl = baseUrl.CombineWith(appPath);
-            return appUrl;
+            baseUrl = baseUrl.CombineWith(appPath, HostContext.Config.HandlerFactoryPath);
+            return baseUrl;
         }
 
         public static string GetApplicationUrl(this IRequest httpReq)
@@ -476,7 +475,7 @@ namespace ServiceStack
                     pathRootFound = true;
                     for (var mappedPathRootIndex = 0; mappedPathRootIndex < mappedPathRootParts.Length; mappedPathRootIndex++)
                     {
-                        if (!String.Equals(fullPathParts[fullPathIndex - fullPathIndexOffset + mappedPathRootIndex], mappedPathRootParts[mappedPathRootIndex], StringComparison.InvariantCultureIgnoreCase))
+                        if (!String.Equals(fullPathParts[fullPathIndex - fullPathIndexOffset + mappedPathRootIndex], mappedPathRootParts[mappedPathRootIndex], StringComparison.OrdinalIgnoreCase))
                         {
                             pathRootFound = false;
                             break;
@@ -492,7 +491,7 @@ namespace ServiceStack
 
         public static bool IsContentType(this IRequest request, string contentType)
         {
-            return request.ContentType.StartsWith(contentType, StringComparison.InvariantCultureIgnoreCase);
+            return request.ContentType.StartsWith(contentType, StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool HasAnyOfContentTypes(this IRequest request, params string[] contentTypes)
@@ -555,10 +554,6 @@ namespace ServiceStack
             return contentType;
         }
 
-        public static string[] PreferredContentTypes = new[] {
-			MimeTypes.Html, MimeTypes.Json, MimeTypes.Xml, MimeTypes.Jsv
-		};
-
         /// <summary>
         /// Use this to treat Request.Items[] as a cache by returning pre-computed items to save 
         /// calculating them multiple times.
@@ -589,20 +584,22 @@ namespace ServiceStack
             }
 
             var customContentTypes = HostContext.ContentTypes.ContentTypeFormats.Values;
+            var preferredContentTypes = HostContext.Config.PreferredContentTypesArray;
 
             var acceptsAnything = false;
             var hasDefaultContentType = !String.IsNullOrEmpty(defaultContentType);
             if (acceptContentTypes != null)
             {
-                var hasPreferredContentTypes = new bool[PreferredContentTypes.Length];
-                foreach (var contentType in acceptContentTypes)
+                var hasPreferredContentTypes = new bool[preferredContentTypes.Length];
+                foreach (var acceptsType in acceptContentTypes)
                 {
+                    var contentType = acceptsType.SplitOnFirst(";")[0];
                     acceptsAnything = acceptsAnything || contentType == "*/*";
 
-                    for (var i = 0; i < PreferredContentTypes.Length; i++)
+                    for (var i = 0; i < preferredContentTypes.Length; i++)
                     {
                         if (hasPreferredContentTypes[i]) continue;
-                        var preferredContentType = PreferredContentTypes[i];
+                        var preferredContentType = preferredContentTypes[i];
                         hasPreferredContentTypes[i] = contentType.StartsWith(preferredContentType);
 
                         //Prefer Request.ContentType if it is also a preferredContentType
@@ -610,11 +607,19 @@ namespace ServiceStack
                             return preferredContentType;
                     }
                 }
-                for (var i = 0; i < PreferredContentTypes.Length; i++)
+                
+                for (var i = 0; i < preferredContentTypes.Length; i++)
                 {
-                    if (hasPreferredContentTypes[i]) return PreferredContentTypes[i];
+                    if (hasPreferredContentTypes[i]) return preferredContentTypes[i];
                 }
-                if (acceptsAnything && hasDefaultContentType) return defaultContentType;
+
+                if (acceptsAnything)
+                {
+                    if (hasDefaultContentType)
+                        return defaultContentType;
+                    if (HostContext.Config.DefaultContentType != null)
+                        return HostContext.Config.DefaultContentType;
+                }
 
                 foreach (var contentType in acceptContentTypes)
                 {
@@ -687,7 +692,7 @@ namespace ServiceStack
             if (handlerPath != null)
             {
                 var absoluteUri = httpReq.AbsoluteUri;
-                var pos = absoluteUri.IndexOf(handlerPath, StringComparison.InvariantCultureIgnoreCase);
+                var pos = absoluteUri.IndexOf(handlerPath, StringComparison.OrdinalIgnoreCase);
                 if (pos >= 0)
                 {
                     baseUrl = absoluteUri.Substring(0, pos + handlerPath.Length);
