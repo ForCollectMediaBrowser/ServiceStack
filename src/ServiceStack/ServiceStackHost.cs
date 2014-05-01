@@ -23,7 +23,6 @@ using ServiceStack.Messaging;
 using ServiceStack.Metadata;
 using ServiceStack.MiniProfiler.UI;
 using ServiceStack.Serialization;
-using ServiceStack.Text;
 using ServiceStack.VirtualPath;
 using ServiceStack.Web;
 using ServiceStack.Redis;
@@ -91,8 +90,7 @@ namespace ServiceStack
         {
             return new ServiceController(this, assembliesWithServices);
             //Alternative way to inject Service Resolver strategy
-            //return new ServiceManager(this, 
-            //    new ServiceController(() => assembliesWithServices.ToList().SelectMany(x => x.GetTypes())));
+            //return new ServiceController(this, () => assembliesWithServices.ToList().SelectMany(x => x.GetTypes()));
         }
 
         public virtual void SetConfig(HostConfig config)
@@ -120,6 +118,8 @@ namespace ServiceStack
             OnBeforeInit();
             ServiceController.Init();
             Configure(Container);
+
+            ConfigurePlugins();
 
             if (VirtualPathProvider == null)
             {
@@ -364,32 +364,27 @@ namespace ServiceStack
 
             var specifiedContentType = config.DefaultContentType; //Before plugins loaded
 
-            ConfigurePlugins();
-
             LoadPlugin(Plugins.ToArray());
             pluginsLoaded = true;
 
             AfterPluginsLoaded(specifiedContentType);
 
-            var registeredCacheClient = TryResolve<ICacheClient>();
-            using (registeredCacheClient)
+            if (!Container.Exists<ICacheClient>())
             {
-                if (registeredCacheClient == null)
-                {
-                    var redisClientsManager = Container.TryResolve<IRedisClientsManager>();
-                    Container.Register<ICacheClient>(redisClientsManager != null ? redisClientsManager.GetCacheClient() : new MemoryCacheClient());
-                }
+                if (Container.Exists<IRedisClientsManager>())
+                    Container.Register(c => c.Resolve<IRedisClientsManager>().GetCacheClient());
+                else
+                    Container.Register<ICacheClient>(new MemoryCacheClient());
             }
 
-            var registeredMqService = TryResolve<IMessageService>();
-            var registeredMqFactory = TryResolve<IMessageFactory>();
-            if (registeredMqService != null && registeredMqFactory == null)
+            if (Container.Exists<IMessageService>() 
+                && !Container.Exists<IMessageFactory>())
             {
-                Container.Register(c => registeredMqService.MessageFactory);
+                Container.Register(c => c.Resolve<IMessageService>().MessageFactory);
             }
 
-            if (Container.TryResolve<IUserAuthRepository>() != null
-                && Container.TryResolve<IAuthRepository>() == null)
+            if (Container.Exists<IUserAuthRepository>()
+                && !Container.Exists<IAuthRepository>())
             {
                 Container.Register<IAuthRepository>(c => c.Resolve<IUserAuthRepository>());
             }
@@ -585,6 +580,20 @@ namespace ServiceStack
         public virtual RouteAttribute[] GetRouteAttributes(Type requestType)
         {
             return requestType.AllAttributes<RouteAttribute>();
+        }
+
+        public virtual string GenerateWsdl(WsdlTemplateBase wsdlTemplate)
+        {
+            var wsdl = wsdlTemplate.ToString();
+
+            wsdl = wsdl.Replace("http://schemas.datacontract.org/2004/07/ServiceStack", Config.WsdlServiceNamespace);
+
+            if (Config.WsdlServiceNamespace != HostConfig.DefaultWsdlNamespace)
+            {
+                wsdl = wsdl.Replace(HostConfig.DefaultWsdlNamespace, Config.WsdlServiceNamespace);
+            }
+
+            return wsdl;
         }
 
         public virtual void Dispose()

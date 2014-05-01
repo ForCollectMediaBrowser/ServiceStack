@@ -519,5 +519,46 @@ namespace ServiceStack.Razor
         {
             return MvcHtmlString.Create(AppHost.ResolveAbsoluteUrl(virtualPath, Request));
         }
+
+        public void ApplyRequestFilters(object requestDto)
+        {
+            HostContext.ApplyRequestFilters(base.Request, base.Response, requestDto);
+            if (base.Response.IsClosed)
+                throw new StopExecutionException();
+        }
+
+        public void RedirectIfNotAuthenticated(string redirectUrl=null)
+        {
+            if (IsAuthenticated) return;
+
+            redirectUrl = redirectUrl
+                ?? AuthenticateService.HtmlRedirect
+                ?? HostContext.Config.DefaultRedirectPath
+                ?? HostContext.Config.WebHostUrl
+                ?? "/";
+            AuthenticateAttribute.DoHtmlRedirect(redirectUrl, Request, Response, includeRedirectParam: true);
+            throw new StopExecutionException();
+        }
+
+        public bool RenderErrorIfAny()
+        {
+            if (!IsError) return false;
+
+            var responseStatus = GetErrorStatus();
+            var stackTrace = responseStatus.StackTrace != null
+                ? "<pre>" + responseStatus.StackTrace + "</pre>"
+                : "";
+
+            WriteLiteral(@"
+            <div id=""error-response"" class=""alert alert-danger"">
+                <h4>" + 
+                    responseStatus.ErrorCode + ": " + 
+                    responseStatus.Message + @"
+                </h4>" + 
+                stackTrace + 
+            "</div>");
+
+            return true;
+        }
     }
 }

@@ -87,6 +87,17 @@ namespace ServiceStack.Redis
         //Store entities without registering entity ids
         void WriteAll<TEntity>(IEnumerable<TEntity> entities);
 
+        //Scan APIs
+        IEnumerable<string> ScanAllKeys(string pattern = null, int pageSize = 1000);
+        IEnumerable<string> ScanAllSetItems(string setId, string pattern = null, int pageSize = 1000);
+        IEnumerable<KeyValuePair<string, double>> ScanAllSortedSetItems(string setId, string pattern = null, int pageSize = 1000);
+        IEnumerable<KeyValuePair<string, string>> ScanAllHashEntries(string hashId, string pattern = null, int pageSize = 1000);
+
+        //Hyperlog APIs
+        bool AddToHyperLog(string key, params string[] elements);
+        long CountHyperLog(string key);
+        void MergeHyperLogs(string toKey, params string[] fromKeys);
+
         /// <summary>
         /// Returns a high-level typed client API
         /// </summary>
@@ -230,6 +241,9 @@ namespace ServiceStack.Redis
         double GetItemScoreInSortedSet(string setId, string value);
         long StoreIntersectFromSortedSets(string intoSetId, params string[] setIds);
         long StoreUnionFromSortedSets(string intoSetId, params string[] setIds);
+        List<string> SearchSortedSet(string setId, string start = null, string end = null, int? skip = null, int? take = null);
+        long SearchSortedSetCount(string setId, string start = null, string end = null);
+        long RemoveRangeFromSortedSetBySearch(string setId, string start = null, string end = null);
 
         #endregion
 

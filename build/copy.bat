@@ -29,7 +29,7 @@ COPY ..\src\ServiceStack.ProtoBuf\bin\%BUILD%\ServiceStack.ProtoBuf.* ..\NuGet\S
 COPY ..\lib\MsgPack.dll ..\NuGet\ServiceStack.MsgPack\lib\net40
 COPY ..\src\ServiceStack.MsgPack\bin\%BUILD%\ServiceStack.MsgPack.* ..\NuGet\ServiceStack.MsgPack\lib\net40
 
-IF EXIST ..\..\swagger-ui\dist (    
+IF EXIST ..\..\swagger-ui\dist-remove (    
     RMDIR ..\tests\ServiceStack.WebHost.IntegrationTests\swagger-ui /s /q
     MD ..\tests\ServiceStack.WebHost.IntegrationTests\swagger-ui
 
@@ -62,6 +62,8 @@ COPY ..\src\ServiceStack.Server\bin\%BUILD%\ServiceStack.* ..\..\ServiceStack.Te
 COPY ..\src\ServiceStack.Server\bin\%BUILD%\ServiceStack.* ..\..\ServiceStack.Rediss\lib\tests
 COPY ..\src\ServiceStack.Server\bin\%BUILD%\ServiceStack.* ..\..\ServiceStack.OrmLite\lib\tests
 
+COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.dll ..\..\ServiceStack.OrmLite\lib
+COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.pdb ..\..\ServiceStack.OrmLite\lib
 COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Text.dll ..\..\ServiceStack.OrmLite\lib
 COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Text.pdb ..\..\ServiceStack.OrmLite\lib
 COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Common.dll ..\..\ServiceStack.OrmLite\lib
@@ -70,9 +72,14 @@ COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Client.dll ..\..\ServiceStack.
 COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Client.pdb ..\..\ServiceStack.OrmLite\lib
 COPY ..\tests\ServiceStack.Common.Tests\bin\%BUILD%\ServiceStack.Common.Tests.* ..\..\ServiceStack.OrmLite\lib\tests
 
-COPY ..\src\ServiceStack.Interfaces\bin\%BUILD%\ServiceStack.Interfaces.dll ..\lib
+COPY ..\src\ServiceStack.Interfaces\bin\%BUILD%\ServiceStack.Interfaces.* ..\lib
+COPY ..\src\ServiceStack.Common\bin\%BUILD%\ServiceStack.Common.* ..\lib
+COPY ..\src\ServiceStack.Client\bin\%BUILD%\ServiceStack.Client.* ..\lib
+
 COPY ..\lib\ServiceStack.Interfaces.dll ..\..\ServiceStack.Text\lib
 COPY ..\lib\ServiceStack.Interfaces.dll ..\..\ServiceStack.Redis\lib
 COPY ..\lib\ServiceStack.Interfaces.dll ..\..\ServiceStack.OrmLite\lib
+
+COPY ..\src\ServiceStack.Razor.BuildTask\bin\%BUILD%\ServiceStack.Razor.BuildTask.dll ..\lib
 
 REM COPY ..\src\ServiceStack.DtoGen\*.cs  ..\src\ServiceStack\DtoGen

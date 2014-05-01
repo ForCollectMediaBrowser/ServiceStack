@@ -75,28 +75,13 @@ namespace ServiceStack.Common.Tests
     public class DictionarySettingsTest : AppSettingsTest
     {
         [Test]
-        public void GetString_Throws_Exception_On_Nonexistent_Key()
+        public void GetRequiredString_Throws_Exception_On_Nonexistent_Key()
         {
             var appSettings = GetAppSettings();
             try
             {
-                appSettings.GetString("GarbageKey");
+                appSettings.GetRequiredString("GarbageKey");
                 Assert.Fail("GetString did not throw a ConfigurationErrorsException");
-            }
-            catch (ConfigurationErrorsException ex)
-            {
-                Assert.That(ex.Message.Contains("GarbageKey"));
-            }
-        }
-
-        [Test]
-        public void GetList_Throws_Exception_On_Null_Key()
-        {
-            var appSettings = GetAppSettings();
-            try
-            {
-                appSettings.GetList("GarbageKey");
-                Assert.Fail("GetList did not throw a ConfigurationErrorsException");
             }
             catch (ConfigurationErrorsException ex)
             {
@@ -120,6 +105,8 @@ ObjectKey: {SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}";
 
             Assert.That(appSettings.Get("EmptyKey"), Is.EqualTo(""));
             Assert.That(appSettings.Get("RealKey"), Is.EqualTo("This is a real value"));
+
+            Assert.That(appSettings.Get("IntKey", defaultValue:1), Is.EqualTo(42));
 
             var list = appSettings.GetList("ListKey");
             Assert.That(list, Has.Count.EqualTo(5));

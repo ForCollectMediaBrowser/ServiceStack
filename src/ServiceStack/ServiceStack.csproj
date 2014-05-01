@@ -92,11 +92,13 @@
   <ItemGroup>
     <Compile Include="AddHeaderAttribute.cs" />
     <Compile Include="AppHostHttpListenerSmartPoolBase.cs" />
+    <Compile Include="AppSelfHostBase.cs" />
     <Compile Include="AsyncExtensions.cs" />
     <Compile Include="Auth\SocialExtensions.cs" />
     <Compile Include="Auth\UserAuthRepositoryExtensions.cs" />
     <Compile Include="CompressedFileResult.cs" />
     <Compile Include="CompressedResult.cs" />
+    <Compile Include="Configuration\TextFileSettings.cs" />
     <Compile Include="DtoGenFeature.cs" />
     <Compile Include="DtoGen\CSharpGenerator.cs" />
     <Compile Include="DtoGen\StringBuilderWrapper.cs" />
@@ -104,6 +106,7 @@
     <Compile Include="Host\ContentTypes.cs" />
     <Compile Include="Host\Handlers\CustomActionHandler.cs" />
     <Compile Include="Host\Handlers\HttpAsyncTaskHandler.cs" />
+    <Compile Include="Host\RequestBaseWrapper.cs" />
     <Compile Include="Messaging\IMessageHandler.cs" />
     <Compile Include="Messaging\IMessageHandlerDisposer.cs" />
     <Compile Include="Messaging\IMessageHandlerFactory.cs" />
@@ -140,6 +143,7 @@
     <Compile Include="SmartThreadPool\WorkItemsGroup.cs" />
     <Compile Include="SmartThreadPool\WorkItemsGroupBase.cs" />
     <Compile Include="SmartThreadPool\WorkItemsQueue.cs" />
+    <Compile Include="StopExecutionException.cs" />
     <Compile Include="TaskExtensions.cs" />
     <Compile Include="Host\HttpResponseStreamWrapper.cs" />
     <Compile Include="HttpError.cs" />

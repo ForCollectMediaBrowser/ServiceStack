@@ -134,7 +134,22 @@ namespace ServiceStack.VirtualPath
 
         protected override IVirtualFile GetFileFromBackingDirectoryOrDefault(string fileName)
         {
-            return Files.FirstOrDefault(f => f.Name == fileName);
+            var file = Files.FirstOrDefault(f => f.Name.EqualsIgnoreCase(fileName));
+            if (file != null)
+                return file;
+
+            //ResourceDir reads /path/to/a.min.js as path.to.min.js and lays out as /path/to/a/min.js
+            var parts = fileName.SplitOnFirst('.');
+            if (parts.Length > 1)
+            {
+                var dir = GetDirectoryFromBackingDirectoryOrDefault(parts[0]) as ResourceVirtualDirectory;
+                if (dir != null)
+                {
+                    return dir.GetFileFromBackingDirectoryOrDefault(parts[1]);
+                }
+            }
+
+            return null;
         }
 
         protected override IEnumerable<IVirtualFile> GetMatchingFilesInDir(String globPattern)
@@ -144,7 +159,7 @@ namespace ServiceStack.VirtualPath
 
         protected override IVirtualDirectory GetDirectoryFromBackingDirectoryOrDefault(string directoryName)
         {
-            return Directories.FirstOrDefault(d => d.Name == directoryName);
+            return Directories.FirstOrDefault(d => d.Name.EqualsIgnoreCase(directoryName));
         }
 
         protected override string GetRealPathToRoot()

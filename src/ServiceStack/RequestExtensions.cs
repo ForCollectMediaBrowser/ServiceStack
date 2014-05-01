@@ -1,6 +1,6 @@
 using System;
-using ServiceStack.Auth;
 using ServiceStack.Caching;
+using ServiceStack.Host;
 using ServiceStack.Web;
 
 namespace ServiceStack
@@ -43,7 +43,9 @@ namespace ServiceStack
 				return (object)serializedDto;
 
             byte[] compressedBytes = serializedDto.Compress(compressionType);
-            return new CompressedResult(compressedBytes, compressionType, request.ResponseContentType);
+            return new CompressedResult(compressedBytes, compressionType, request.ResponseContentType) {
+                Status = request.Response.StatusCode
+            };
 		}
 
 		/// <summary>
@@ -108,5 +110,10 @@ namespace ServiceStack
 	        httpReq.Items.TryGetValue(key, out value);
 	        return value;
 	    }
-	}
+
+        public static RequestBaseWrapper ToHttpRequestBase(this IRequest httpReq)
+        {
+            return new RequestBaseWrapper((IHttpRequest) httpReq);
+        }
+    }
 }

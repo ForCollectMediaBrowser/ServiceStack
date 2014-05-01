@@ -14,10 +14,28 @@ namespace ServiceStack
         private readonly ILog log = LogManager.GetLogger(typeof(AppHostHttpListenerSmartPoolBase));
         private readonly AutoResetEvent listenForNextRequest = new AutoResetEvent(false);
         private readonly SmartThreadPool threadPoolManager;
+
+        public SmartThreadPool ThreadPoolManager
+        {
+            get { return threadPoolManager; }
+        }
+
+        public int MinThreads
+        {
+            get { return threadPoolManager.MinThreads; }
+            set { threadPoolManager.MinThreads = value; }
+        }
+
+        public int MaxThreads
+        {
+            get { return threadPoolManager.MaxThreads; }
+            set { threadPoolManager.MaxThreads = value; }
+        }
+
         private const int IdleTimeout = 300;
 
         protected AppHostHttpListenerSmartPoolBase(string serviceName, params Assembly[] assembliesWithServices)
-            : this(serviceName, CalculatePoolSize(), assembliesWithServices) { }
+            : base(serviceName, assembliesWithServices) { threadPoolManager = new SmartThreadPool(IdleTimeout); }
 
         protected AppHostHttpListenerSmartPoolBase(string serviceName, int poolSize, params Assembly[] assembliesWithServices)
             : base(serviceName, assembliesWithServices) { threadPoolManager = new SmartThreadPool(IdleTimeout, poolSize); }
@@ -54,7 +72,7 @@ namespace ServiceStack
         }
 
         // Loop here to begin processing of new requests.
-        private void Listen(object state)
+        protected override void Listen(object state)
         {
             while (IsListening)
             {
@@ -113,7 +131,8 @@ namespace ServiceStack
                 listenForNextRequest.Set();
             }
 
-            log.DebugFormat("{0} Request : {1}", context.Request.UserHostAddress, context.Request.RawUrl);
+            if (Config.DebugMode)
+                log.DebugFormat("{0} Request : {1}", context.Request.UserHostAddress, context.Request.RawUrl);
 
             RaiseReceiveWebRequest(context);
 

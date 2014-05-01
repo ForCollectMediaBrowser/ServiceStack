@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using ServiceStack.Host;
+using ServiceStack.Host.Handlers;
 using ServiceStack.Html;
 using ServiceStack.IO;
 using ServiceStack.Logging;
@@ -11,7 +12,9 @@ using ServiceStack.Web;
 
 namespace ServiceStack.Razor
 {
-    public class RazorFormat : IPlugin, IRazorPlugin, IRazorConfig
+    using System.Reflection;
+
+    public class RazorFormat : IPlugin, IRazorPlugin, IRazorConfig, IPreInitPlugin
     {
         public const string TemplatePlaceHolder = "@RenderBody()";
 
@@ -28,6 +31,8 @@ namespace ServiceStack.Razor
             Deny = new List<Predicate<string>> {
                 DenyPathsWithLeading_,
             };
+
+            LoadFromAssemblies = new List<Assembly>();
         }
 
         //configs
@@ -36,6 +41,7 @@ namespace ServiceStack.Razor
         public string DefaultPageName { get; set; }
         public string WebHostUrl { get; set; }
         public string ScanRootPath { get; set; }
+        public List<Assembly> LoadFromAssemblies { get; set; }
         public List<Predicate<string>> Deny { get; set; }
         public bool? EnableLiveReload { get; set; }
         public bool? PrecompilePages { get; set; }
@@ -59,6 +65,11 @@ namespace ServiceStack.Razor
         //managers
         protected RazorViewManager ViewManager;
         protected RazorPageResolver PageResolver;
+
+        public void Configure(IAppHost appHost)
+        {
+            LoadFromAssemblies.Each(appHost.Config.EmbeddedResourceSources.AddIfNotExists);
+        }
 
         public void Register(IAppHost appHost)
         {
@@ -145,19 +156,18 @@ namespace ServiceStack.Razor
             return new FileSystemWatcherLiveReload(viewManager);
         }
 
-        public RazorPage FindByPathInfo(string pathInfo)
-        {
-            return ViewManager.GetPageByPathInfo(pathInfo);
-        }
-
         public void ProcessRazorPage(IRequest httpReq, RazorPage contentPage, object model, IResponse httpRes)
         {
-            PageResolver.ResolveAndExecuteRazorPage(httpReq, httpRes, model, contentPage);
+            PageResolver.ExecuteRazorPage(httpReq, httpRes, model, contentPage);
         }
 
         public void ProcessRequest(IRequest httpReq, IResponse httpRes, object dto)
         {
             PageResolver.ProcessRequest(httpReq, httpRes, dto);
+        }
+        public void ProcessContentPageRequest(IRequest httpReq, IResponse httpRes)
+        {
+            ((IServiceStackHandler)PageResolver).ProcessRequest(httpReq, httpRes, httpReq.OperationName);
         }
 
         public RazorPage AddPage(string filePath)
@@ -165,14 +175,14 @@ namespace ServiceStack.Razor
             return ViewManager.AddPage(filePath);
         }
 
-        public RazorPage GetPageByName(string pageName)
+        public RazorPage GetViewPage(string pageName)
         {
-            return ViewManager.GetPageByName(pageName);
+            return ViewManager.GetViewPage(pageName);
         }
 
-        public RazorPage GetPageByPathInfo(string pathInfo)
+        public RazorPage GetContentPage(string pathInfo)
         {
-            return ViewManager.GetPageByPathInfo(pathInfo);
+            return ViewManager.GetContentPage(pathInfo);
         }
 
         public RazorPage CreatePage(string razorContents)
@@ -222,11 +232,7 @@ namespace ServiceStack.Razor
                 httpReq.Items[RazorPageResolver.LayoutKey] = layout;
             }
 
-            razorView = PageResolver.ResolveAndExecuteRazorPage(
-                httpReq: httpReq,
-                httpRes: httpReq.Response,
-                model: model,
-                razorPage: razorPage);
+            razorView = PageResolver.ExecuteRazorPage(httpReq, httpReq.Response, model, razorPage);
 
             var ms = (MemoryStream)httpReq.Response.OutputStream;
             return ms.ToArray().FromUtf8Bytes();
@@ -239,6 +245,7 @@ namespace ServiceStack.Razor
         Type PageBaseType { get; }
         string DefaultPageName { get; }
         string ScanRootPath { get; }
+        List<Assembly> LoadFromAssemblies { get; }
         string WebHostUrl { get; }
         List<Predicate<string>> Deny { get; }
         bool? PrecompilePages { get; set; }

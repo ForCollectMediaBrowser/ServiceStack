@@ -186,6 +186,7 @@
     <Compile Include="OAuth\MockAuthHttpGateway.cs" />
     <Compile Include="OAuth\OAuthUserSessionWithoutTestSourceTests.cs" />
     <Compile Include="OAuth\RequiredRolesTests.cs" />
+    <Compile Include="PerfUtilsTests.cs" />
     <Compile Include="Perf\DateTimePerf.cs" />
     <Compile Include="Perf\IdUtilsPerf.cs" />
     <Compile Include="Perf\PropertyAccessorPerf.cs" />
@@ -307,7 +308,7 @@
     </Content>
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(SolutionDir)\.nuget\nuget.targets" />
+  <Import Project="$(SolutionDir)\.nuget\NuGet.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">

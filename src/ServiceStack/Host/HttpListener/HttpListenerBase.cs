@@ -7,6 +7,9 @@ using System.Net;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web;
+using ServiceStack.Host.Handlers;
+using ServiceStack.IO;
 using ServiceStack.Logging;
 using ServiceStack.Web;
 
@@ -34,7 +37,10 @@ namespace ServiceStack.Host.HttpListener
         public event DelReceiveWebRequest ReceiveWebRequest;
 
         protected HttpListenerBase(string serviceName, params Assembly[] assembliesWithServices)
-            : base(serviceName, assembliesWithServices) {}
+            : base(serviceName, assembliesWithServices)
+        {
+            RawHttpHandlers.Add(RedirectDirectory);
+        }
 
         public override void OnAfterInit()
         {
@@ -64,6 +70,34 @@ namespace ServiceStack.Host.HttpListener
         {
             Start(urlBase, Listen);
             return this;
+        }
+
+        /// <summary>
+        /// Retain the same behavior as ASP.NET and redirect requests to directores 
+        /// without a trailing '/'
+        /// </summary>
+        public IHttpHandler RedirectDirectory(IHttpRequest request)
+        {
+            var dir = request.GetVirtualNode() as IVirtualDirectory;
+            if (dir != null)
+            {
+                if (!request.PathInfo.EndsWith("/"))
+                {
+                    return new RedirectHttpHandler
+                    {
+                        RelativeUrl = request.PathInfo + "/",
+                    };
+                }
+            }
+            return null;
+        }
+
+
+        public virtual ListenerRequest CreateRequest(HttpListenerContext httpContext, string operationName)
+        {
+            var req = new ListenerRequest(httpContext, operationName, RequestAttributes.None);
+            req.RequestAttributes = req.GetAttributes();
+            return req;
         }
 
         /// <summary>
@@ -118,7 +152,7 @@ namespace ServiceStack.Host.HttpListener
         }
 
         // Loop here to begin processing of new requests.
-        private void Listen(object state)
+        protected virtual void Listen(object state)
         {
             while (IsListening)
             {
@@ -178,7 +212,8 @@ namespace ServiceStack.Host.HttpListener
 
             if (context == null) return;
 
-            Log.DebugFormat("{0} Request : {1}", context.Request.UserHostAddress, context.Request.RawUrl);
+            if (Config.DebugMode)
+                Log.DebugFormat("{0} Request : {1}", context.Request.UserHostAddress, context.Request.RawUrl);
 
             //System.Diagnostics.Debug.WriteLine("Start: " + requestNumber + " at " + DateTime.UtcNow);
             //var request = context.Request;
@@ -214,6 +249,7 @@ namespace ServiceStack.Host.HttpListener
         {
             try
             {
+                ex = ex.UnwrapIfSingleException();
                 var httpReq = CreateHttpRequest(context);
                 Log.Error("Error this.ProcessRequest(context): [{0}]: {1}".Fmt(ex.GetType().GetOperationName(), ex.Message), ex);
 
