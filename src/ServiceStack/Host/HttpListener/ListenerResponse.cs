@@ -56,9 +56,35 @@ namespace ServiceStack.Host.HttpListener
             response.Redirect(url);
         }
 
+        private MemoryStream bufferedStream;
         public Stream OutputStream
         {
-            get { return response.OutputStream; }
+            get { return bufferedStream ?? response.OutputStream; }
+        }
+
+        public bool UseBufferedStream
+        {
+            get { return bufferedStream != null; }
+            set
+            {
+                bufferedStream = value
+                    ? bufferedStream ?? new MemoryStream()
+                    : null;
+            }
+        }
+
+        private void FlushBufferIfAny()
+        {
+            if (bufferedStream == null)
+                return;
+
+            var bytes = bufferedStream.ToArray();
+            try {
+                SetContentLength(bytes.LongLength); //safe to set Length in Buffered Response
+            } catch {}
+
+            response.OutputStream.Write(bytes, 0, bytes.Length);
+            bufferedStream = new MemoryStream();
         }
 
         public object Dto { get; set; }
@@ -70,8 +96,7 @@ namespace ServiceStack.Host.HttpListener
                 var bOutput = System.Text.Encoding.UTF8.GetBytes(text);
                 response.ContentLength64 = bOutput.Length;
 
-                var outputStream = response.OutputStream;
-                outputStream.Write(bOutput, 0, bOutput.Length);
+                OutputStream.Write(bOutput, 0, bOutput.Length);
                 Close();
             }
             catch (Exception ex)
@@ -89,6 +114,8 @@ namespace ServiceStack.Host.HttpListener
 
                 try
                 {
+                    FlushBufferIfAny();
+
                     this.response.CloseOutputStream();
                 }
                 catch (Exception ex)
@@ -105,6 +132,8 @@ namespace ServiceStack.Host.HttpListener
 
         public void Flush()
         {
+            FlushBufferIfAny();
+
             response.OutputStream.Flush();
         }
 

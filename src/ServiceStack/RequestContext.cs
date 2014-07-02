@@ -9,14 +9,23 @@ namespace ServiceStack
     public class RequestContext
     {
         public static readonly RequestContext Instance = new RequestContext();
-        
-		/// <summary>
-		/// Gets a list of items for this request. 
-		/// </summary>
-		/// <remarks>This list will be cleared on every request and is specific to the original thread that is handling the request.
-		/// If a handler uses additional threads, this data will not be available on those threads.
-		/// </remarks>
-		public virtual IDictionary Items
+
+        /// <summary>
+        /// Tell ServiceStack to use ThreadStatic Items Collection for RequestScoped items.
+        /// Warning: ThreadStatic Items aren't pinned to the same request in async services which callback on different threads.
+        /// </summary>
+        public static bool UseThreadStatic;
+
+        [ThreadStatic]
+        public static IDictionary RequestItems;
+
+        /// <summary>
+        /// Gets a list of items for this request. 
+        /// </summary>
+        /// <remarks>This list will be cleared on every request and is specific to the original thread that is handling the request.
+        /// If a handler uses additional threads, this data will not be available on those threads.
+        /// </remarks>
+        public virtual IDictionary Items
         {
             get
             {
@@ -36,6 +45,9 @@ namespace ServiceStack
         {
             try
             {
+                if (UseThreadStatic)
+                    return RequestItems;
+
                 return CallContext.LogicalGetData(_key) as IDictionary;
             }
             catch (NotImplementedException)
@@ -49,7 +61,14 @@ namespace ServiceStack
         {
             try
             {
-                CallContext.LogicalSetData(_key, items ?? (items = new ConcurrentDictionary<object, object>()));
+                if (UseThreadStatic)
+                {
+                    RequestItems = items ?? (items = new Dictionary<object, object>());
+                }
+                else
+                {
+                    CallContext.LogicalSetData(_key, items ?? (items = new ConcurrentDictionary<object, object>()));
+                }
             }
             catch (NotImplementedException)
             {
@@ -64,12 +83,15 @@ namespace ServiceStack
             if (Items.Contains(typeof(T).Name))
                 return (T)Items[typeof(T).Name];
 
-            return (T) (Items[typeof(T).Name] = createFn());
+            return (T)(Items[typeof(T).Name] = createFn());
         }
 
         public void EndRequest()
         {
-            CallContext.FreeNamedDataSlot(_key);
+            if (UseThreadStatic)
+                Items = null;
+            else
+                CallContext.FreeNamedDataSlot(_key);
         }
 
         /// <summary>
@@ -86,7 +108,7 @@ namespace ServiceStack
             if (!Items.Contains(DispsableTracker.HashId))
                 Items[DispsableTracker.HashId] = dispsableTracker = new DispsableTracker();
             if (dispsableTracker == null)
-                dispsableTracker = (DispsableTracker) Items[DispsableTracker.HashId];
+                dispsableTracker = (DispsableTracker)Items[DispsableTracker.HashId];
             dispsableTracker.Add(instance);
         }
     }

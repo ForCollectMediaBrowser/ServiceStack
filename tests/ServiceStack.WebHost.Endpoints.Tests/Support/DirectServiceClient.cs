@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading.Tasks;
@@ -104,11 +105,6 @@ namespace ServiceStack.WebHost.Endpoints.Tests.Support
             throw new NotImplementedException();
         }
 
-        TResponse IRestClient.PostFile<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, string mimeType)
-        {
-            throw new NotImplementedException();
-        }
-
         public HttpWebResponse CustomMethod(string httpVerb, IReturnVoid requestDto)
         {
             throw new NotImplementedException();
@@ -154,6 +150,12 @@ namespace ServiceStack.WebHost.Endpoints.Tests.Support
             throw new NotImplementedException();
         }
 
+        public TResponse PostFileWithRequest<TResponse>(
+            Stream fileToUpload, string fileName, object request, string fieldName = "upload")
+        {
+            throw new NotImplementedException();
+        }
+
         public HttpWebResponse Get(object request)
         {
             throw new NotImplementedException();
@@ -193,6 +195,11 @@ namespace ServiceStack.WebHost.Endpoints.Tests.Support
             if (ApplyResponseFilters<TResponse>(response)) return (TResponse)response;
 
             return (TResponse)response;
+        }
+
+        public IEnumerable<TResponse> GetLazy<TResponse>(IReturn<QueryResponse<TResponse>> queryDto)
+        {
+            throw new NotImplementedException();
         }
 
         public HttpWebResponse Delete(IReturnVoid requestDto)

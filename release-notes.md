@@ -1,15 +1,876 @@
 # Release Notes
 
+# v4.0.22 Release Notes
+
+## OrmLite
+
+This was primarily an OrmLite-focused release with the introduction of major new features:
+
+### Typed SQL Expressions now support Joins!
+
+Another [highly requested feature](http://servicestack.uservoice.com/forums/176786-feature-requests/suggestions/4459040-enhance-ormlite-with-common-data-usage-patterns) has been realized in this release with OrmLite's typed SqlExpressions extended to add support for Joins. 
+
+The new JOIN support follows OrmLite's traditional approach of a providing a DRY, typed RDBMS-agnostic wrapper that retains a high affinity with SQL, providing an intuitive API that generates predictable SQL and a light-weight mapping to clean POCO's.
+
+### Basic Example
+
+Starting with the most basic example you can simply specify the table you want to join with:
+
+```csharp
+var dbCustomers = db.Select<Customer>(q => q.Join<CustomerAddress>());
+```
+
+This query rougly maps to the following SQL:
+
+```sql
+SELECT Customer.* 
+  FROM Customer 
+       INNER JOIN 
+       CustomerAddress ON (Customer.Id == CustomerAddress.Id)
+```
+
+Just like before `q` is an instance of `SqlExpression<Customer>` which is bounded to the base `Customer` type (and what any subsequent implicit API's apply to). 
+
+To better illustrate the above query, lets expand it to the equivalent explicit query:
+
+```csharp
+SqlExpression<Customer> q = db.From<Customer>();
+q.Join<Customer,CustomerAddress>();
+
+List<Customer> dbCustomers = db.Select(q);
+```
+
+### Reference Conventions
+
+The above query joins together the `Customer` and `CustomerAddress` POCO's using the same relationship convention used in [OrmLite's support for References](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/LoadReferencesTests.cs), i.e. using the referenced table `{ParentType}Id` property convention.
+
+An example of what this looks like can be seen the POCO's below:
+
+```csharp
+class Customer {
+    public Id { get; set; }
+    ...
+}
+class CustomerAddress {
+    public Id { get; set; }
+    public CustomerId { get; set; }  // Reference based on Property name convention
+}
+```
+
+References based on matching alias names is also supported, e.g:
+
+```csharp
+[Alias("LegacyCustomer")]
+class Customer {
+    public Id { get; set; }
+    ...
+}
+class CustomerAddress {
+    public Id { get; set; }
+
+    [Alias("LegacyCustomerId")]             // Matches `LegacyCustomer` Alias
+    public RenamedCustomerId { get; set; }  // Reference based on Alias Convention
+}
+```
+
+Either convention lets you save a POCO and all its entity references with `db.Save()`, e.g:
+
+```csharp
+var customer =  new Customer {
+    Name = "Customer 1",
+    PrimaryAddress = new CustomerAddress {
+        AddressLine1 = "1 Australia Street",
+        Country = "Australia"
+    },
+};
+db.Save(customer, references:true);
+```
+
+Going back to the above example: 
+
+```csharp
+q.Join<CustomerAddress>();
+```
+
+Uses the implicit join in the above reference convention to expand into the equivalent explicit API: 
+
+```csharp
+q.Join<Customer,CustomerAddress>((customer,address) => customer.Id == address.CustomerId);
+```
+
+### Selecting multiple columns across joined tables
+
+Another behaviour implicit when selecting from a typed SqlExpression is that results are mapped to the `Customer` POCO. To change this default we just need to explicitly specify what POCO it should map to instead:
+
+```csharp
+List<FullCustomerInfo> customers = db.Select<FullCustomerInfo>(
+    db.From<Customer>().Join<CustomerAddress>());
+```
+
+Where `FullCustomerInfo` is any POCO that contains a combination of properties matching any of the joined tables in the query. 
+
+The above example is also equivalent to the shorthand `db.Select<Into,From>()` API:
+
+```csharp
+var customers = db.Select<FullCustomerInfo,Customer>(q => q.Join<CustomerAddress>());
+```
+
+Rules for how results are mapped is simply each property on `FullCustomerInfo` is mapped to the first matching property in any of the tables in the order they were added to the SqlExpression.
+
+As most OrmLite tables have a primary key property named `Id`, the auto-mapping includes a fallback for mapping to a full namespaced Id property in the same `{Type}Id` format. This allows you to auto-populate `CustomerId`, `CustomerAddressId` and `OrderId` columns even though they aren't a match to any of the fields in any of the joined tables.
+
+### Advanced Example
+
+Seeing how the SqlExpression is constructed, joined and mapped, we can take a look at a more advanced example to showcase more of the new API's available:
+
+```csharp
+List<FullCustomerInfo> rows = db.Select<FullCustomerInfo>( // Map results to FullCustomerInfo POCO
+  db.From<Customer>()                                      // Create typed Customer SqlExpression
+    .LeftJoin<CustomerAddress>()                           // Implict left join with base table
+    .Join<Customer, Order>((c,o) => c.Id == o.CustomerId)  // Explicit join and condition
+    .Where(c => c.Name == "Customer 1")                    // Implicit condition on base table
+    .And<Order>(o => o.Cost < 2)                           // Explicit condition on joined Table
+    .Or<Customer,Order>((c,o) => c.Name == o.LineItem));   // Explicit condition with joined Tables
+```
+
+The comments next to each line document each Type of API used. Some of the new API's introduced in this example include:
+
+  - Usage of `LeftJoin` for LEFT JOIN'S, `RightJoin` and `FullJoin` also available
+  - Usage of `And<Table>()`, to specify a condition on a Joined table 
+  - Usage of `Or<Table1,Table2>`, to specify a condition against 2 joined tables
+
+More code examples of References and Joined tables are available in:
+
+  - [LoadReferencesTests.cs](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/LoadReferencesTests.cs)
+  - [LoadReferencesJoinTests.cs](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/LoadReferencesJoinTests.cs)
+
+## Optimistic Concurrency
+
+Another major feature added to OrmLite is support for optimistic concurrency which can be added to any table by adding a `ulong RowVersion { get; set; }` property, e.g:
+
+```csharp
+public class Poco
+{
+    ...
+    public ulong RowVersion { get; set; }
+}
+```
+
+RowVersion is implemented efficiently in all major RDBMS's, i.e:
+
+ - Uses `rowversion` datatype in SqlServer 
+ - Uses PostgreSql's `xmin` system column (no column on table required)
+ - Uses UPDATE triggers on MySql, Sqlite and Oracle whose lifetime is attached to Create/Drop tables APIs
+
+Despite their differing implementations each provider works the same way where the `RowVersion` property is populated when the record is selected and only updates the record if the RowVersion matches with what's in the database, e.g:
+
+```csharp
+var rowId = db.Insert(new Poco { Text = "Text" }, selectIdentity:true);
+
+var row = db.SingleById<Poco>(rowId);
+row.Text += " Updated";
+db.Update(row); //success!
+
+row.Text += "Attempting to update stale record";
+
+//Can't update stale record
+Assert.Throws<OptimisticConcurrencyException>(() =>
+    db.Update(row));
+
+//Can update latest version
+var updatedRow = db.SingleById<Poco>(rowId);  // fresh version
+updatedRow.Text += "Update Success!";
+db.Update(updatedRow);
+
+updatedRow = db.SingleById<Poco>(rowId);
+db.Delete(updatedRow);                        // can delete fresh version
+```
+
+Optimistic concurrency is only verified on API's that update or delete an entire entity, i.e. it's not enforced in partial updates. There's also an Alternative API available for DELETE's:
+
+```csharp
+db.DeleteById<Poco>(id:updatedRow.Id, rowversion:updatedRow.RowVersion)
+```
+
+### Other OrmLite features
+
+  - New [Limit API's added to JoinSqlBuilder](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/Expression/SqlExpressionTests.cs#L126-L168)
+  - SqlExpression's are now tied to the dialect provider at time of creation
+
+## ServiceStack.Text
+
+A new `JsConfig.ReuseStringBuffer` performance config option is available to JSON and JSV Text Serializers which lets you re-use ThreadStatic StringBuilder when serializing to a string. In initial benchmarks (both synchronous and parallel) it shows around a **~%30 increase in performance** for small POCO's. It can be enabled with:
+
+```csharp
+JsConfig.ReuseStringBuffer = true;
+```
+
+Default enum values can be excluded from being serialized with:
+
+```csharp
+JsConfig.IncludeDefaultEnums = false;
+```
+
+## ServiceStack
+
+### [Messaging](https://github.com/ServiceStack/ServiceStack/wiki/Messaging)
+
+Improved support for the MQ Request/Reply pattern with the new `GetTempQueueName()` API now available in all MQ Clients which returns a temporary queue (prefixed with `mq:tmp:`) suitable for use as the ReplyTo queue in Request/Reply scenarios:
+
+```csharp
+mqServer.RegisterHandler<Hello>(m =>
+    new HelloResponse { Result = "Hello, {0}!".Fmt(m.GetBody().Name) });
+mqServer.Start();
+
+using (var mqClient = mqServer.CreateMessageQueueClient())
+{
+    var replyToMq = mqClient.GetTempQueueName();
+    mqClient.Publish(new Message<Hello>(new Hello { Name = "World" }) {
+        ReplyTo = replyToMq
+    });
+
+    IMessage<HelloResponse> responseMsg = mqClient.Get<HelloResponse>(replyToMq);
+    mqClient.Ack(responseMsg);
+    var responseDto = responseMsg.GetBody(); 
+}
+```
+
+On [Rabbit MQ](https://github.com/ServiceStack/ServiceStack/wiki/Rabbit-MQ) it creates an exclusive non-durable queue. 
+
+In [Redis MQ](https://github.com/ServiceStack/ServiceStack/wiki/Messaging-and-Redis) there's a new `RedisMqServer.ExpireTemporaryQueues()` API which can be used on StartUp to expire temporary queues after a given period.
+
+Synchronous and Parallel tests for this feature is available in [MqRequestReplyTests.cs](https://github.com/ServiceStack/ServiceStack/blob/master/tests/ServiceStack.Server.Tests/Messaging/MqRequestReplyTests.cs).
+
+## New NuGet packages
+
+  - [ServiceStack.Authentication.LightSpeed](https://www.nuget.org/packages/ServiceStack.Authentication.LightSpeed/) is a new User Auth Repository created by [Herdy Handoko](https://plus.google.com/u/0/+HerdyHandoko/posts) providing a new persistence option for User Authentication backed by [Mindscape's LightSpeed ORM](http://www.mindscapehq.com/products/lightspeed). Checkout the [GitHub Project](https://github.com/hhandoko/ServiceStack.Authentication.LightSpeed) for more info.
+
+### Other Framework Features
+
+ - Added support for locking users in all AuthProviders by populating `UserAuth.LockedDate`, effective from next login attempt
+ - Reduced dependencies on all Logging providers, now only depends on `ServiceStack.Interfaces`
+ - ContentLength is written where possible allowing [Async Progress callbacks on new payloads](https://github.com/ServiceStack/ServiceStack/blob/master/tests/ServiceStack.WebHost.Endpoints.Tests/AsyncProgressTests.cs)
+ - Non authenticated requests to `/auth` throw a 401 (otherwise returns basic session info)
+ - Metadata filter now supports IE8/IE9
+ - `CopyTo` and `WriteTo` Stream extensions now return bytes transferred 
+
+# v4.0.21 Release Notes
+
+## Authentication
+
+### Windows Auth Provider for ASP.NET
+
+An ASP.NET WindowsAuth Provider preview is available. This essentially wraps the existing Windows Auth support baked into ASP.NET and adds an adapter for [ServiceStack's Multi-Provider Authentication model](https://github.com/ServiceStack/ServiceStack/wiki/Authentication-and-authorization).
+
+It can be registered just like any other Auth Provider, i.e. in the AuthFeature plugin:
+
+```csharp
+Plugins.Add(new AuthFeature(
+    () => new CustomUserSession(), 
+    new IAuthProvider[] {
+        new AspNetWindowsAuthProvider(this) { AllowAllWindowsAuthUsers = true }, 
+    }
+));
+```
+
+By default it only allows access to users in `AspNetWindowsAuthProvider.LimitAccessToRoles`, but can be overridden with `AllowAllWindowsAuthUsers=true` to allow access to all Windows Auth users as seen in the example above. 
+
+Credentials can be attached to ServiceStack's Service Clients the same way [as .NET WebRequest's](http://stackoverflow.com/a/3563033/85785) by assingning the `Credentials` property, e.g:
+
+```csharp
+var client = new JsonServiceClient(BaseUri) {
+    Credentials = CredentialCache.DefaultCredentials,
+};
+
+var response = client.Get(new RequiresAuth { Name = "Haz Access!" });
+```
+
+To help with debugging, [?debug=requestinfo](https://github.com/ServiceStack/ServiceStack/wiki/Debugging#request-info) has been extended to include the Request's current Logon User info:
+
+![WindowsAuth DebugInfo](https://github.com/ServiceStack/Assets/raw/master/img/release-notes/debuginfo-windowsauth.png)
+
+> We're interested in hearing future use-cases this can support, feedback on this and future integration with Windows Auth are welcomed on [the Active Directory Integration feature request](http://servicestack.uservoice.com/forums/176786-feature-requests/suggestions/4725924-built-in-active-directory-authentication-suport).
+
+### New GitHub and other OAuth Providers available
+
+Thanks to [Rouslan Grabar](https://github.com/iamruss) we now have a number of new OAuth providers built into ServiceStack, including authentication with GitHub, Russia's most popular search engine [Yandex](http://www.yandex.ru/) and Europe's largest Social Networks after Facebook, [VK](http://vk.com) and [Odnoklassniki](http://odnoklassniki.ru/):
+
+```csharp
+Plugins.Add(new AuthFeature(
+    () => new CustomUserSession(), 
+    new IAuthProvider[] {
+        new GithubAuthProvider(appSettings), 
+        new YandexAuthProvider(appSettings), 
+        new VkAuthProvider(appSettings), 
+        new OdnoklassnikiAuthProvider(appSettings), 
+    }
+));
+```
+
+### Extended Auth DTO's
+
+You can now test whether a user is authenticated by calling the Auth Service without any parameters, e.g. `/auth` which will return summary auth info of the currently authenticated user or a `401` if the user is not authenticated. A `DisplayName` property was added to `AuthenticateResponse` to return a friendly name of the currently authenticated user.
+
+## [Portable ServiceStack](https://github.com/ServiceStack/ServiceStack.Gap)
+
+A new [ServiceStack.Gap](https://github.com/ServiceStack/ServiceStack.Gap) Repository and NuGet package was added to help with creating ServiceStack-powered Desktop applications.
+
+ServiceStack has a number of features that's particularly well-suited for these kind of apps:
+
+ - It allows your services to be self-hosted using .NET's HTTP Listener
+ - It supports pre-compiled Razor Views
+ - It supports Embedded resources
+ - It supports an embedded database in Sqlite and OrmLite
+ - It can be ILMerged into a single .exe
+
+Combined together this allows you to encapsulate your ServiceStack application into a single cross-platform .exe that can run on Windows or OSX.
+
+To illustrate the potential of embedded ServiceStack solutions, a portable version [httpbenchmarks.servicestack.net](https://httpbenchmarks.servicestack.net) was created targetting a number of platforms below:
+
+> **[BenchmarksAnalyzer.zip](https://github.com/ServiceStack/ServiceStack.Gap/raw/master/deploy/BenchmarksAnalyzer.zip)** - Single .exe that opens the BenchmarksAnalyzer app in the users browser
+
+[![Partial Console Screenshot](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/gap/partial-exe.png)](https://github.com/ServiceStack/ServiceStack.Gap/raw/master/deploy/BenchmarksAnalyzer.zip)
+
+> **[BenchmarksAnalyzer.Mac.zip](https://github.com/ServiceStack/ServiceStack.Gap/raw/master/deploy/BenchmarksAnalyzer.Mac.zip)** - Self-hosted app running inside a OSX Cocoa App Web Browser
+
+[![Partial OSX Screenshot](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/gap/partial-osx.png)](https://github.com/ServiceStack/ServiceStack.Gap/raw/master/deploy/BenchmarksAnalyzer.Mac.zip)
+
+> **[BenchmarksAnalyzer.Windows.zip](https://github.com/ServiceStack/ServiceStack.Gap/raw/master/deploy/BenchmarksAnalyzer.Windows.zip)** - Self-hosted app running inside a Native WinForms app inside [CEF](https://code.google.com/p/chromiumembedded/)
+
+[![Partial Windows Screenshot](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/gap/partial-win.png)](https://github.com/ServiceStack/ServiceStack.Gap/raw/master/deploy/BenchmarksAnalyzer.Windows.zip)
+
+### Usage
+
+By default `BenchmarksAnalyzer.exe` will scan the directory where it's run from, it also supports being called with the path to `.txt` or `.zip` files to view or even a directory where output files are located. Given this there are a few popular ways to use Benchmarks Analyzer:
+
+ - Drop `BenchmarksAnalyzer.exe` into a directory of benchmark outputs before running it
+ - Drop a `.zip` or folder onto the `BenchmarksAnalyzer.exe` to view those results
+
+> Note: It can also be specified as a command-line argument, e.g: "BenchmarksAnalyzer.exe path\to\outputs"
+
+![Benchmarks Analyzer Usage](https://github.com/ServiceStack/Assets/raw/master/img/gap/benchmarksanalyzer-usage.gif)
+
+### ServiceStack.Gap Developer Guide
+
+The guides on how each application was created is on [ServiceStack.Gap](https://github.com/ServiceStack/ServiceStack.Gap) site, i.e:
+
+ - [Self-Hosting Console App](https://github.com/ServiceStack/ServiceStack.Gap#self-hosting-console-app)
+ - [Windows Forms App with Chromium Embedded Framework and CefSharp](https://github.com/ServiceStack/ServiceStack.Gap#winforms-with-chromium-embedded-framework)
+ - [Mac OSX Cocoa App with Xmarain.Mac](https://github.com/ServiceStack/ServiceStack.Gap#mac-osx-cocoa-app-with-xmarainmac)
+
+## Other Framework Features
+
+### Filtering support added to Metadata pages
+
+You can now filter services on ServiceStack's `/metadata` page:
+
+![Metadata Filter](https://github.com/ServiceStack/Assets/raw/master/img/release-notes/metadata-filter.png)
+
+### Typed Request Filters
+
+A more typed API to register Global Request and Response filters per Request DTO Type are available under the `RegisterTyped*` API's in AppHost. These can be used to provide more flexibility in multi-tenant solutions by attaching custom data on incoming requests, e.g:
+
+```csharp
+public override void Configure(Container container)
+{
+    RegisterTypedRequestFilter<Resource>((req, res, dto) =>
+    {
+        var route = req.GetRoute();
+        if (route != null && route.Path == "/tenant/{TenantName}/resource")
+        {
+            dto.SubResourceName = "CustomResource";
+        }
+    });
+}
+```
+
+Typed Filters can also be used to apply custom behavior on Request DTO's sharing a common interface, e.g:
+
+```csharp
+public override void Configure(Container container)
+{
+    RegisterTypedRequestFilter<IHasSharedProperty>((req, res, dtoInterface) => {
+        dtoInterface.SharedProperty = "Is Shared";    
+    });
+}
+```
+
+### Buffered Stream option has now added to Response 
+
+Response streams can be buffered in the same way as you can buffer Request streams by setting `UseBufferedStream=true`, e.g:
+
+```csharp
+appHost.PreRequestFilters.Add((httpReq, httpRes) => {
+    httpReq.UseBufferedStream = true;
+    httpRes.UseBufferedStream = true;    
+});
+
+```
+
+### AfterInitCallbacks added to AppHost
+
+You can register callbacks to add custom logic straight after the AppHost has finished initializing. E.g. you can find all Roles specified in `[RequiredRole]` attributes with:
+
+```csharp
+appHost.AfterInitCallbacks.Add(host =>
+{
+    var allRoleNames = host.Metadata.OperationsMap
+        .SelectMany(x => x.Key.AllAttributes<RequiredRoleAttribute>()
+            .Concat(x.Value.ServiceType.AllAttributes<RequiredRoleAttribute>()))
+        .SelectMany(x => x.RequiredRoles);
+});
+```
+
+### Request Scopes can be configured to use ThreadStatic
+
+Request Scoped dependencies are stored in `HttpRequest.Items` for ASP.NET hosts and uses Remoting's `CallContext.LogicalData` API's in self-hosts. Using the Remoting API's can be problematic in old versions of Mono or when executed in test runners.
+
+If this is an issue the RequestContext can be configured to use ThreadStatic with:
+
+```csharp
+RequestContext.UseThreadStatic = true;
+```
+
+### Logging
+
+Updated Logging providers to allow `debugEnabled` in their LogFactory constructor, e.g:
+
+```csharp
+LogFactory.LogManager = new NullLogFactory(debugEnabled:false);
+LogFactory.LogManager = new ConsoleLogFactory(debugEnabled:true);
+LogFactory.LogManager = new DebugLogFactory(debugEnabled:true);
+```
+
+Detailed command logging is now enabled in OrmLite and Redis when `debugEnabled=true`. The external Logging provider NuGet packages have also been updated to use their latest version.
+
+### Razor
+
+ - Enabled support for Razor `@helpers` and `@functions` in Razor Views
+ - Direct access to Razor Views in `/Views` is now denied by default
+
+### Service Clients
+
+ - Change Silverlight to auto emulate HTTP Verbs for non GET or POST requests
+ - Shorter aliases added on `PostFileWithRequest` which uses the Request DTO's auto-generated url
+ - The [PCL version of ServiceStack.Interfaces](https://github.com/ServiceStack/Hello) now supports a min version of .NET 4.0
+
+## OrmLite
+
+### Exec and Result Filters
+
+A new `CaptureSqlFilter` Results Filter has been added which shows some of the power of OrmLite's Result filters by being able to capture SQL Statements without running them, e.g:
+
+```csharp
+public class CaptureSqlFilter : OrmLiteResultsFilter
+{
+    public CaptureSqlFilter()
+    {
+        SqlFilter = CaptureSql;
+        SqlStatements = new List<string>();
+    }
+
+    private void CaptureSql(string sql)
+    {
+        SqlStatements.Add(sql);
+    }
+
+    public List<string> SqlStatements { get; set; }
+}
+```
+
+This can then be wrapped around existing database calls to capture and print the generated SQL, e.g:
+
+```csharp
+using (var captured = new CaptureSqlFilter())
+using (var db = OpenDbConnection())
+{
+    db.CreateTable<Person>();
+    db.Count<Person>(x => x.Age < 50);
+    db.Insert(new Person { Id = 1, FirstName = "Jimi", LastName = "Hendrix" });
+    db.Delete<Person>(new { FirstName = "Jimi", Age = 27 });
+
+    var sql = string.Join(";\n", captured.SqlStatements.ToArray());
+    sql.Print();
+}
+```
+
+#### Exec filters can be limited to specific Dialect Providers
+
+```csharp
+OrmLiteConfig.DialectProvider.ExecFilter = execFilter;
+```
+
+### OrmLite's custom SqlBuilders now implement ISqlExpression
+
+OrmLite provides good support in integrating with external or custom SQL builders that implement OrmLite's simple `ISqlExpression` interface which can be passed directly to `db.Select()` API. This has now been added to OrmLite's other built-in SQL Builders, e.g:
+
+#### Using JoinSqlBuilder
+
+```csharp
+var joinQuery = new JoinSqlBuilder<User, User>()
+    .LeftJoin<User, Address>(x => x.Id, x => x.UserId, 
+        sourceWhere: x => x.Age > 18, 
+        destinationWhere: x => x.Country == "Italy");
+
+var results = db.Select<User>(joinQuery);
+```
+
+#### Using SqlBuilder
+
+```csharp
+var tmpl = sb.AddTemplate(
+    "SELECT * FROM User u INNER JOIN Address a on a.UserId = u.Id /**where**/");
+sb.Where("Age > @age", new { age = 18 });
+sb.Where("Countryalias = @country", new { country = "Italy" });
+
+var results = db.Select<User>(tmpl, tmpl.Parameters);
+```
+
+### Other Changes
+
+ - OrmLite can create tables with any numeric type in all providers. Fallbacks were added on ADO.NET providers that don't support the numeric type natively
+ - Load/Save Reference property conventions can be [inferred on either aliases or C# property names](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/LoadReferencesTests.cs#L207)
+ - OrmLite can create tables from types with Indexers
+ - Can use `OrmLiteConfig.StripUpperInLike=true` to [remove use of upper() in Sql Expressions](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/Expression/SelectExpressionTests.cs#L205)
+
+## Redis
+
+A new `TrackingRedisClientsManager` client manager has been added by [Thomas James](https://github.com/tvjames) to help diagnose Apps that are leaking redis connections. 
+
+# v4.0.19 Release Notes
+
+## Embedded ServiceStack
+
+This release has put all the final touches together to open up interesting new use-cases for deploying ServiceStack solutions into a single self-contained, cross-platform, xcopy-able executable.
+
+By leveraging ServiceStack's support for [self-hosting](https://github.com/ServiceStack/ServiceStack/wiki/Self-hosting), the [Virtual File System](https://github.com/ServiceStack/ServiceStack/wiki/Virtual-file-system) support for Embedded Resources and the new support for [Compiled Razor Views](#compiled-razor-views), we can embed all images/js/css Razor views and Markdown Razor assets into a single dll that can be ILMerged with the preferred ServiceStack dependencies (inc. OrmLite.Sqlite) into a single cross-platform .NET exe:
+
+### Razor Rockstars - Embedded Edition
+
+To showcase its potential we've compiled the entire [Razor Rockstars](http://razor.servicestack.net/) website into a [single dll](https://github.com/ServiceStack/RazorRockstars/tree/master/src/RazorRockstars.CompiledViews) that's referenced them in the multiple use-case scenarios below:
+
+> Note: all demo apps are unsigned so will require ignoring security warnings to run.
+
+### As a Single Self-Hosted .exe
+
+The examples below merges Razor Rockstars and ServiceStack into a Single, cross-platform, self-hosting Console App, that opens up Razor Rockstars homepage in the users default web browser when launched:
+
+> [RazorRockstars.exe](https://github.com/ServiceStack/RazorRockstars/raw/master/build/RazorRockstars.exe) - Self-Host running in a Console App
+
+> [WindowlessRockstars.exe](https://github.com/ServiceStack/RazorRockstars/raw/master/build/WindowlessRockstars.exe) - Headless Self-Hosted Console App running in the background
+
+[![SelfHost](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/self-host.png)](https://github.com/ServiceStack/RazorRockstars/raw/master/build/RazorRockstars.exe)
+
+> The total size for the entire  uncompressed **RazorRockstars.exe** ServiceStack website comes down to just **4.8MB** (lighter than the 5MB footprint of EntityFramework.dll) that includes **1.5MB** for RazorRockstars html/img/js/css website assets and **630kb** for native Windows sqlite3.dll.
+
+### Running inside Windows and OSX Native Desktop Apps
+
+You can also achieve a [PhoneGap-like experience](http://phonegap.com/) by hosting ServiceStack inside native .NET Desktop App shells for OSX and Windows:
+
+> [RazorRockstars.MacHost.app](https://github.com/ServiceStack/RazorRockstars/raw/master/build/RazorRockstars.MacHost.app.zip) - Running inside a Desktop Cocoa OSX app using [Xamarin.Mac](https://xamarin.com/mac)
+
+[![OSX Cocoa App](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/osx-host.png)](https://github.com/ServiceStack/RazorRockstars/raw/master/build/RazorRockstars.MacHost.app.zip)
+
+> [WpfHost.zip](https://github.com/ServiceStack/RazorRockstars/raw/master/build/WpfHost.zip) - Running inside a WPF Desktop app
+
+[![WPF App](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/wpf-host.png)](https://github.com/ServiceStack/RazorRockstars/raw/master/build/WpfHost.zip)
+
+Surprisingly .NET Desktop apps built with [Xamarin.Mac on OSX](https://xamarin.com/mac) using Cocoa's WebKit-based WebView widget provides a superior experience over WPF's built-in WebBrowser widget which renders in an old behind-the-times version of IE. To improve the experience on Windows we're exploring better experiences on Windows by researching options around the [Chromium Embedded Framework](https://code.google.com/p/chromiumembedded/) and the existing managed .NET wrappers: [CefGlue](http://xilium.bitbucket.org/cefglue/) and [CefSharp](https://github.com/cefsharp/CefSharp).
+
+**Xamarin.Mac** can deliver an even better end-user experience by bundling the Mono runtime with the app avoiding the need for users to have Mono runtime installed. Incidentally this is the same approach used to deploy .NET OSX apps to the [Mac AppStore](http://www.apple.com/osx/apps/app-store.html).
+
+### Standard Web Hosts
+
+As the only differences when using the embedded .dll is that it embeds all img/js/css/etc assets as embedded resources and makes use of compiled razor views, it can also be used in standard web hosts configurations which are effectively just lightweight wrappers containing the App configuration and references to external dependencies:
+
+  - [CompiledViews in SelfHost](https://github.com/ServiceStack/RazorRockstars/tree/master/src/RazorRockstars.CompiledViews.SelfHost)
+  - [CompiledViews in ASP.NET Web Host](https://github.com/ServiceStack/RazorRockstars/tree/master/src/RazorRockstars.CompiledViews.WebHost)
+
+Benefits of Web Hosts referencing embedded dlls include easier updates by being able to update a websites core functionality by copying over a single **.dll** as well as improved performance for Razor views by eliminating Razor compile times.
+
+### ILMerging
+
+Creating the single **RazorRockstars.exe** is simply a matter of [ILMerging all the self-host project dlls](https://github.com/ServiceStack/RazorRockstars/blob/master/build/ilmerge.bat) into a single executable. 
+
+There are only a couple of issues that need to be addressed when running in a single ILMerged .exe:
+
+Assembly names are merged together so all registration of assemblies in `Config.EmbeddedResourceSources` end up referencing the same assembly which results in only serving embedded resources in the host assembly namespace. To workaround this behavior we've added a more specific way to reference assemblies in `Config.EmbeddedResourceBaseTypes`, e.g:
+
+ ```csharp
+ SetConfig(new HostConfig {
+    DebugMode = true,
+    EmbeddedResourceBaseTypes = { GetType(), typeof(BaseTypeMarker) },
+});
+```
+
+Where `BaseTypeMarker` is just a dummy class that sits on the base namespace of the class library that's used to preserve the Assembly namespace.
+
+The other limitation is not being able to merge unmanaged .dll's, which is what's needed for RazorRockstars as it makes use of the native `sqlite3.dll`. An easy workaround for this is to make `sqlite3.dll` an embedded resource then simply write it out to the current directory where OrmLite.Sqlite can find it when it first makes an sqlite connection, e.g:
+
+ ```csharp
+public static void ExportWindowsSqliteDll()
+{
+    if (Env.IsMono)
+        return; //Uses system sqlite3.so or sqlite3.dylib on Linux/OSX
+
+    var resPath = "{0}.sqlite3.dll".Fmt(typeof(AppHost).Namespace);
+
+    var resInfo = typeof(AppHost).Assembly.GetManifestResourceInfo(resPath);
+    if (resInfo == null)
+        throw new Exception("Couldn't load sqlite3.dll");
+
+    var dllBytes = typeof(AppHost).Assembly.GetManifestResourceStream(resPath).ReadFully();
+    var dirPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+    var filePath = Path.Combine(dirPath, "sqlite3.dll");
+
+    File.WriteAllBytes(filePath, dllBytes);
+}
+```
+
+This isn't required for Mono as it's able to make use of the preinstalled version of sqlite on OSX and Linux platforms.
+
+### Compiled Razor Views
+
+Support for Compiled Razor Views has landed in ServiceStack thanks to the efforts of [Carl Healy](https://github.com/Tyst).
+
+The primary benefits of compiled views is improved performance by eliminating compile times of Razor views. They also provide static compilation benefits by highlighting compile errors during development and also save you from deploying multiple `*.cshtml` files with your app since they all end up pre-compiled in your Assembly. 
+
+Enabling compiled views is fairly transparent where you only need to install the new [Razor.BuildTask NuGet Package](https://www.nuget.org/packages/ServiceStack.Razor.BuildTask/) to the project containing your `.cshtml` Razor Views you want to compile:
+
+    PM> Install-Package ServiceStack.Razor.BuildTask
+
+This doesn't add any additional dlls to your project, instead it just sets the **BuildAction** to all `*.cshtml` pages to `Content` and adds an MSBuild task to your project file to pre-compile razor views on every build.
+
+Then to register assemblies containing compiled razor views with Razor Format you just need to add it to `RazorFormat.LoadFromAssemblies`, e.g:
+
+```csharp
+Plugins.Add(new RazorFormat {
+    LoadFromAssemblies = { typeof(RockstarsService).Assembly }
+});
+```
+
+The Compiled Views support continues to keep a great development experience in [DebugMode](https://github.com/ServiceStack/ServiceStack/wiki/Debugging#debugmode) where all Razor Views are initially loaded from the Assembly but then continues to monitor the file system for modified views, automatically compiling and loading them on the fly.
+
+## [Postman Support](http://www.getpostman.com/)
+
+We've added great support for the very popular [Postman Rest Client](http://www.getpostman.com/) in this release which is easily enabled by just registering the plugins below:
+
+```csharp
+Plugins.Add(new PostmanFeature());
+Plugins.Add(new CorsFeature());
+```
+
+> As it makes cross-site requests, Postman also requires CORS support. 
+
+Once enabled, a link with appear in your metadata page:
+
+![Postman Metadata link](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/postman-metadata.png)
+
+Which by default is a link to `/postman` route that returns a JSON postman collection that can be imported into postman by clicking on **import collections** icon at the top:
+
+![Postman Screenshot](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/postman.png)
+
+Once imported it will populate a list of available routes which you can select and easily call from the Postman UI. Just like the [Swagger Support](https://github.com/ServiceStack/ServiceStack/wiki/Swagger-API) the list of operations returned respects the [Restriction Attributes](https://github.com/ServiceStack/ServiceStack/wiki/Restricting-Services) and only shows the operations each user is allowed to see.
+
+The above screenshot shows how to call the `SearchRockstars` Route `/rockstars/{Id}` which returns the rockstar with the matching id.
+
+The screenshot above also illustrates some of the customization that's available with the [Email Contacts](https://github.com/ServiceStack/EmailContacts/) metadata imported with the default settings and the Razor Rockstars metadata imported with a customized label: 
+
+    /postman?label=type,+,route
+
+The `label` param accepts a collection of string tokens that controls how the label is formatted.The `type` and `route` are special tokens that get replaced by the **Request DTO name** and **Route** respectively. Everything else are just added string literals including the `+` character which is just a url-encoded version of ` ` space character.
+
+Here are some examples using the example definition below:
+
+```csharp
+[Route("/contacts/{Id}")]
+public class GetContact { ... }
+```
+
+<table>
+<tr>
+    <td><b>/postman?label=type</b></td>
+    <td>GetContact</td>
+</tr>
+<tr>
+    <td><b>/postman?label=route</b></td>
+    <td>/contacts/{Id}</td>
+</tr>
+<tr>
+    <td><b>/postman?label=type:english</b></td>
+    <td>Get contact</td>
+</tr>
+<tr>
+    <td><b>/postman?label=type:english,+(,route,)</b></td>
+    <td>Get contact (/contacts/{Id})</td>
+</tr>
+</table>
+
+The default label format can also be configured when registering the Postman plugin, e.g:
+
+```csharp
+Plugins.Add(new PostmanFeature { 
+    DefaultLabelFmt = new List<string> { "type:english", " ", "route" }
+});
+```
+
+### Support for authenticated requests
+
+We've also made it easy to call authentication-only services with the `/postman?exportSession=true` parameter which will redirect to a url that captures your session cookies into a deep-linkable url like `/postman?ssopt=temp&ssid={key}&sspid={key}` that can be copied into Postman.
+
+This lets you replace your session cookies with the session ids on the url, effectively allowing you to take over someone elses session, in this case telling Postman to make requests on your behalf using your authenticated session cookies. 
+
+As this functionality is potentially dangerous it's only enabled by default in **DebugMode** but can be overridden with:
+
+```csharp
+Plugins.Add(new PostmanFeature { 
+    EnableSessionExport = true
+});
+```
+
+### Other Customizations
+
+Other options include hosting postman on an alternate path, adding custom HTTP Headers for each Postman request and providing friendly aliases for Request DTO Property Types that you want to appear to external users, in this case we can show `DateTime` types as `Date` in Postmans UI:
+
+```csharp
+Plugins.Add(new PostmanFeature { 
+    AtRestPath = "/alt-postman-link",
+    Headers = "X-Custom-Header: Value\nXCustom2: Value2",
+    FriendlyTypeNames = { {"DateTime", "Date"} },
+});
+```
+
+## [Cascading layout templates](http://razor.servicestack.net/#no-ceremony)
+
+Support for [Cascading layout templates](http://razor.servicestack.net/#no-ceremony) for Razor ViewPages inside `/Views` were added in this release by [@Its-Tyson](https://github.com/Its-Tyson). 
+
+This works the same intuitive way it does for external Razor Content pages where the `_Layout.cshtml` nearest to the selected View will be used by default, e.g: 
+
+    /Views/_Layout.cshtml
+    /Views/Public.cshtml
+    /Views/Admin/_Layout.cshtml
+    /Views/Admin/Dashboard.cshtml
+
+Where `/Views/Admin/Dashboard.cshtml` by default uses the `/Views/Admin/_Layout.cshtml` template.
+
+## Async APIs added to HTTP Utils 
+
+The following Async versions of [HTTP Utils](https://github.com/ServiceStack/ServiceStack/wiki/Http-Utils) have been added to ServiceStack.Text by [Kyle Gobel](https://github.com/KyleGobel):
+
+```csharp
+Task<string> GetStringFromUrlAsync(...)
+Task<string> PostStringToUrlAsync(...)
+Task<string> PostToUrlAsync(...)
+Task<string> PostJsonToUrlAsync(...)
+Task<string> PostXmlToUrlAsync(...)
+Task<string> PutStringToUrlAsync(...)
+Task<string> PutToUrlAsync(...)
+Task<string> PutJsonToUrlAsync(...)
+Task<string> PutXmlToUrlAsync(...)
+Task<string> DeleteFromUrlAsync(...)
+Task<string> OptionsFromUrlAsync(...)
+Task<string> HeadFromUrlAsync(...)
+Task<string> SendStringToUrlAsync(...)
+```
+
+## Redis
+
+The latest [stable release of redis-server](http://download.redis.io/redis-stable/00-RELEASENOTES) includes support for the new [ZRANGEBYLEX](http://redis.io/commands/zrangebylex) sorted set operations allowing you to query a sorted set lexically. A good showcase for this is available on [autocomplete.redis.io](http://autocomplete.redis.io/) that shows a demo querying all 8 millions of unique lines of the Linux kernel source code in a fraction of a second.
+
+These new operations are available as a 1:1 mapping with redis-server on IRedisNativeClient:
+
+```csharp
+public interface IRedisNativeClient
+{
+    ...
+    byte[][] ZRangeByLex(string setId, string min, string max, int? skip = null, int? take = null);
+    long ZLexCount(string setId, string min, string max);
+    long ZRemRangeByLex(string setId, string min, string max);
+}
+```
+
+As well as under more user-friendly APIs under IRedisClient:
+
+```csharp
+public interface IRedisClient
+{
+    ...
+    List<string> SearchSortedSet(string setId, string start=null, string end=null, int? skip=null, int? take=null);
+    long SearchSortedSetCount(string setId, string start=null, string end=null);
+    long RemoveRangeFromSortedSetBySearch(string setId, string start=null, string end=null);
+}
+```
+
+Just like NuGet version matchers, Redis uses `[` char to express inclusiveness and `(` char for exclusiveness.
+Since the `IRedisClient` APIs defaults to inclusive searches, these two APIs are the same:
+
+```csharp
+Redis.SearchSortedSetCount("zset", "a", "c")
+Redis.SearchSortedSetCount("zset", "[a", "[c")
+```
+
+Alternatively you can specify one or both bounds to be exclusive by using the `(` prefix, e.g:
+
+```csharp
+Redis.SearchSortedSetCount("zset", "a", "(c")
+Redis.SearchSortedSetCount("zset", "(a", "(c")
+```
+
+More API examples are available in [LexTests.cs](https://github.com/ServiceStack/ServiceStack.Redis/blob/master/tests/ServiceStack.Redis.Tests/LexTests.cs).
+
+### Twemproxy support
+
+This release also includes better support for [twemproxy](https://github.com/twitter/twemproxy), working around missing server commands sent upon connection.
+
+## OrmLite
+
+New support for StringFilter allowing you apply custom filter on string values, e.g [remove trailing whitespace](http://stackoverflow.com/a/23261868/85785):
+
+```csharp
+OrmLiteConfig.StringFilter = s => s.TrimEnd();
+
+db.Insert(new Poco { Name = "Value with trailing   " });
+Assert.That(db.Select<Poco>().First().Name, Is.EqualTo("Value with trailing"));
+```
+
+Added implicit support for [escaping wildcards in typed expressions](http://stackoverflow.com/a/23435975/85785) that make use of LIKE, namely `StartsWith`, `EndsWith` and `Contains`, e.g:
+
+```csharp
+db.Insert(new Poco { Name = "ab" });
+db.Insert(new Poco { Name = "a%" });
+db.Insert(new Poco { Name = "a%b" });
+
+db.Count<Poco>(q => q.Name.StartsWith("a_")); //0
+db.Count<Poco>(q => q.Name.StartsWith("a%")); //2
+```
+
+OrmLite also underwent some internal refactoring to remove duplicate code and re-use existing code-paths.
+
+### Other Features
+
+ - Allow overriding of `HttpListenerBase.CreateRequest()` for controlling creation of Self-Hosting requests allowing you to force a [Character encoding to override the built-in heuristics](http://stackoverflow.com/a/23381383/85785) for detecting non UTF-8 character encodings
+ - Support for retrieving untyped `base.UserSession` when inheriting from an untyped MVC `ServiceStackController` 
+ - Added `@Html.RenderErrorIfAny()` to render a pretty bootstrap-styled exception response in a razor view
+ - The generated WSDL output now replaces all occurances of `http://schemas.servicestack.net/types` with `Config.WsdlServiceNamespace` 
+ - Initialize the CompressedResult Status code with the current HTTP ResponseStatus code
+ - Plugins implementing `IPreInitPlugin` are now configured immediately after `AppHost.Configure()`
+ - HttpListeners now unwrap async Aggregate exceptions containing only a Single Exception for better error reporting
+ - HttpListeners now shares the same behavior as IIS for [redirecting requests for directories without a trailing slash](https://github.com/ServiceStack/ServiceStack/commit/a0a2857721656c7161fcd83eb07609ae4239ea2a)
+ - [Debug Request Info](https://github.com/ServiceStack/ServiceStack/wiki/Debugging#request-info) now shows file listing of the configured VirtualPathProvider
+ - Resource Virtual Directories are no longer case-sensitive 
+ - Added new `Config.ExcludeAutoRegisteringServiceTypes` option to exclude services from being implicitly auto registered from assembly scanning. All built-in services in ServiceStack.dll now excluded by default which removes unintentional registration of services from ILMerging.
+
 # New HTTP Benchmarks example project
 
-[![HTTP Benchmarks](https://raw.githubusercontent.com/ServiceStack/HttpBenchmarks/master/src/ResultsView/Content/img/AdminUI.png)](https://benchmarks.servicestack.net/)
+[![HTTP Benchmarks](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/benchmarks-admin-ui.png)](https://httpbenchmarks.servicestack.net/)
 
-Following the release of the [Email Contacts](https://github.com/ServiceStack/EmailContacts/) solution, a new documented ServiceStack example project allowing you to uploaded Apache HTTP Benchmarks to visualize and analyze their results has been released at: [github.com/ServiceStack/HttpBenchmarks](https://github.com/ServiceStack/HttpBenchmarks) and is hosted at [benchmarks.servicestack.net](https://benchmarks.servicestack.net/).
+Following the release of the [Email Contacts](https://github.com/ServiceStack/EmailContacts/) solution, a new documented ServiceStack example project allowing you to uploaded Apache HTTP Benchmarks to visualize and analyze their results has been released at: [github.com/ServiceStack/HttpBenchmarks](https://github.com/ServiceStack/HttpBenchmarks) and is hosted at [httpbenchmarks.servicestack.net](https://httpbenchmarks.servicestack.net/).
 
 ### Example Results
 
-  - [Performance of different RDBMS in an ASP.NET Host](https://benchmarks.servicestack.net/databases-in-asp-net)
-  - [Performance of different ServiceStack Hosts](https://benchmarks.servicestack.net/servicestack-hosts)
+  - [Performance of different RDBMS in an ASP.NET Host](https://httpbenchmarks.servicestack.net/databases-in-asp-net)
+  - [Performance of different ServiceStack Hosts](https://httpbenchmarks.servicestack.net/servicestack-hosts)
 
 The documentation includes a development guide that walks through the projects different features:
 
@@ -658,7 +1519,7 @@ using (var db = OpenDbConnection())
 A new ServiceStack guidance is available detailing the recommended setup and physical layout structure of typical medium-sized ServiceStack projects.
 It includes the complete documentation going through how to create the solution from scratch, and explains all the ServiceStack hidden features it makes use of along the way.
 
-[![EmailContacts Screenshot](https://raw.github.com/ServiceStack/EmailContacts/master/src/EmailContacts/Content/splash.png)](https://github.com/ServiceStack/EmailContacts/)
+[![EmailContacts Screenshot](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/email-contacts.png)](https://github.com/ServiceStack/EmailContacts/)
 
 [EmailContacts](https://github.com/ServiceStack/EmailContacts/) is a Single Page App built using just ServiceStack, 
 jQuery and Bootstrap that showcases some of ServiceStack's built-in features, useful in the reducing the effort for 
@@ -1004,7 +1865,7 @@ QueueNames<Hello>.In  //= SITE.hello.INQ
 
 To provide better visibility to the hidden functionality in ServiceStack we've added **Debug Info** links section to the `/metadata` page which add links to any Plugins with Web UI's, e.g:
 
-![Debug Info Links](http://i.imgur.com/2Hf3P9L.png)
+![Debug Info Links](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/debug-links.png)
 
 The Debug Links section is only available in **DebugMode** (recap: set by default in Debug builds or explicitly with `Config.DebugMode = true`). In addition, users with the **Admin** role (or if `Config.AdminAuthSecret` is enabled) can also view the debug Plugins UI's in production.
 
@@ -1163,7 +2024,7 @@ New in this release:
 
 The biggest feature of this release is the release of the new Portable Client NuGet packages:
 
-[![Portable Class Library Support](https://raw2.github.com/ServiceStack/Hello/master/screenshots/portable-splash-900.png)](https://github.com/ServiceStack/Hello)
+[![Portable Class Library Support](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/hello-pcl.png)](https://github.com/ServiceStack/Hello)
 
   - ServiceStack.Interfaces.Pcl
     - PCL Profiles: iOS, Android, Windows8, .NET 4.5, Silverlight5, WP8

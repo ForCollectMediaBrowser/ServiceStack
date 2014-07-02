@@ -7,6 +7,8 @@ using System.Runtime.Serialization;
 using System.Text;
 using System.Web;
 using System.Web.Hosting;
+using ServiceStack.Data;
+using ServiceStack.Host;
 using ServiceStack.Host.AspNet;
 using ServiceStack.Host.Handlers;
 using ServiceStack.Host.HttpListener;
@@ -88,11 +90,20 @@ namespace ServiceStack
 
         public static string GetPathUrl(this IRequest httpReq)
 		{
-			var resolvedPathInfo = httpReq.PathInfo;
+			var resolvedPathInfo = httpReq.PathInfo.TrimEnd('/');
 
-			var pos = resolvedPathInfo == String.Empty
-				? httpReq.AbsoluteUri.Length
-				: httpReq.AbsoluteUri.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
+            int pos;
+
+            if (resolvedPathInfo == string.Empty)
+            {
+                pos = httpReq.AbsoluteUri.IndexOf('?');
+                if (pos == -1)
+                    pos = httpReq.AbsoluteUri.Length;
+            }
+            else
+            {
+                pos = httpReq.AbsoluteUri.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
+            }
 
 			if (pos == -1)
 				throw new ArgumentException(
@@ -279,6 +290,7 @@ namespace ServiceStack
             if (ex is ArgumentException || ex is SerializationException) return (int)HttpStatusCode.BadRequest;
             if (ex is AuthenticationException) return (int) HttpStatusCode.Unauthorized;
             if (ex is UnauthorizedAccessException) return (int) HttpStatusCode.Forbidden;
+            if (ex is OptimisticConcurrencyException) return (int) HttpStatusCode.Conflict;
             return (int)HttpStatusCode.InternalServerError;
 	    }
         
@@ -876,6 +888,18 @@ namespace ServiceStack
         public static System.ServiceModel.Channels.Message GetSoapMessage(this IRequest httpReq)
         {
             return httpReq.Items["SoapMessage"] as System.ServiceModel.Channels.Message;
+        }
+
+        public static void SetRoute(this IRequest req, RestPath route)
+        {
+            req.Items["__route"] = route;
+        }
+
+        public static RestPath GetRoute(this IRequest req)
+        {
+            object route;
+            req.Items.TryGetValue("__route", out route);
+            return route as RestPath;
         }
     }
 }

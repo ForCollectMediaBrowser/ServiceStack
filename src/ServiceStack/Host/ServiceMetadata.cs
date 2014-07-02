@@ -63,7 +63,8 @@ namespace ServiceStack.Host
             var nonCoreServicesCount = OperationsMap.Values
                 .Count(x => x.ServiceType.Assembly != typeof(Service).Assembly
                 && x.ServiceType.FullName != "ServiceStack.Api.Swagger.SwaggerApiService"
-                && x.ServiceType.FullName != "ServiceStack.Api.Swagger.SwaggerResourcesService");
+                && x.ServiceType.FullName != "ServiceStack.Api.Swagger.SwaggerResourcesService"
+                && x.ServiceType.Name != "__AutoQueryServices");
 
             LicenseUtils.AssertValidUsage(LicenseFeature.ServiceStack, QuotaType.Operations, nonCoreServicesCount);
         }
@@ -272,8 +273,8 @@ namespace ServiceStack.Host
 				return RequestType.GetOperationName(); 
 			}
     	}
-		//public string Name { get { return RequestType.Name; } }
-		public Type RequestType { get; set; }
+
+        public Type RequestType { get; set; }
         public Type ServiceType { get; set; }
         public Type ResponseType { get; set; }
         public RestrictAttribute RestrictTo { get; set; }

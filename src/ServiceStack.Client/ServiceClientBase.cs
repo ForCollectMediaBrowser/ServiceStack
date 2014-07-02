@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
@@ -419,6 +420,15 @@ namespace ServiceStack
             }
         }
 
+        protected T Deserialize<T>(string text)
+        {
+            using (__requestAccess())
+            using (var ms = new MemoryStream(text.ToUtf8Bytes()))
+            {
+                return DeserializeFromStream<T>(ms);
+            }
+        }
+
         public virtual TResponse Send<TResponse>(IReturn<TResponse> request)
         {
             return Send<TResponse>((object)request);
@@ -637,7 +647,8 @@ namespace ServiceStack
                 }
             }
 
-            var client = (HttpWebRequest)WebRequest.Create(requestUri);
+            var client = PclExport.Instance.CreateWebRequest(requestUri,
+                emulateHttpViaPost: EmulateHttpViaPost);
 
             try
             {
@@ -713,7 +724,7 @@ namespace ServiceStack
                 GlobalRequestFilter(client);
         }
 
-        private IDisposable __requestAccess()
+        protected IDisposable __requestAccess()
         {
             return LicenseUtils.RequestAccess(AccessToken.__accessToken, LicenseFeature.Client, LicenseFeature.Text);
         }
@@ -1012,6 +1023,21 @@ namespace ServiceStack
             return Send<TResponse>(HttpMethods.Get, relativeOrAbsoluteUrl, null);
         }
 
+        public virtual IEnumerable<TResponse> GetLazy<TResponse>(IReturn<QueryResponse<TResponse>> queryDto)
+        {
+            var query = (IQuery)queryDto;
+            QueryResponse<TResponse> response;
+            do
+            {
+                response = Get<QueryResponse<TResponse>>(queryDto.ToUrl(HttpMethods.Get, Format));
+                foreach (var result in response.Results)
+                {
+                    yield return result;
+                }
+                query.Skip = query.Skip.GetValueOrDefault(0) + response.Results.Count;
+            }
+            while (response.Results.Count + response.Offset < response.Total);
+        }
 
         public virtual HttpWebResponse Delete(IReturnVoid requestDto)
         {
@@ -1177,15 +1203,10 @@ namespace ServiceStack
             return Send<HttpWebResponse>(HttpMethods.Head, relativeOrAbsoluteUrl, null);
         }
 
-#if !PCL
-        public virtual TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request, string fieldName = "upload")
+        public virtual TResponse PostFileWithRequest<TResponse>(Stream fileToUpload, string fileName, object request, string fieldName = "upload")
         {
-            using (FileStream fileStream = fileToUpload.OpenRead())
-            {
-                return PostFileWithRequest<TResponse>(relativeOrAbsoluteUrl, fileStream, fileToUpload.Name, request, fieldName);
-            }
+            return PostFileWithRequest<TResponse>(request.ToPostUrl(), fileToUpload, fileName, request, fieldName);
         }
-#endif
 
         public virtual TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, object request, string fieldName = "upload")
         {
@@ -1259,16 +1280,6 @@ namespace ServiceStack
                 return response;
             }
         }
-
-#if !PCL
-        public virtual TResponse PostFile<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, string mimeType)
-        {
-            using (FileStream fileStream = fileToUpload.OpenRead())
-            {
-                return PostFile<TResponse>(relativeOrAbsoluteUrl, fileStream, fileToUpload.Name, mimeType);
-            }
-        }
-#endif
 
         public virtual TResponse PostFile<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, string mimeType)
         {
@@ -1344,5 +1355,35 @@ namespace ServiceStack
         }
 
         public void Dispose() { }
+    }
+
+    public static class ServiceClientExtensions
+    {
+#if !(NETFX_CORE || SL5 || PCL)
+        public static TResponse PostFile<TResponse>(this IRestClient client,
+            string relativeOrAbsoluteUrl, FileInfo fileToUpload, string mimeType) 
+        {
+            using (FileStream fileStream = fileToUpload.OpenRead())
+            {
+                return client.PostFile<TResponse>(relativeOrAbsoluteUrl, fileStream, fileToUpload.Name, mimeType);
+            }
+        }
+
+        public static TResponse PostFileWithRequest<TResponse>(this IRestClient client, 
+            FileInfo fileToUpload, object request, string fieldName = "upload")
+        {
+            return client.PostFileWithRequest<TResponse>(request.ToPostUrl(), fileToUpload, request, fieldName);
+        }
+
+        public static TResponse PostFileWithRequest<TResponse>(this IRestClient client,
+            string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request, string fieldName = "upload")
+        {
+            using (FileStream fileStream = fileToUpload.OpenRead())
+            {
+                return client.PostFileWithRequest<TResponse>(relativeOrAbsoluteUrl, fileStream, fileToUpload.Name, request, fieldName);
+            }            
+        }
+#endif
+        
     }
 }

@@ -93,6 +93,9 @@ namespace ServiceStack.Host
                     assemblyName = assembly.FullName;
                     foreach (var type in assembly.GetTypes())
                     {
+                        if (appHost.ExcludeAutoRegisteringServiceTypes.Contains(type))
+                            continue;
+
                         typeName = type.GetOperationName();
                         results.Add(type);
                     }
@@ -501,6 +504,28 @@ namespace ServiceStack.Host
 
             var handlerFn = GetService(requestType);
             return handlerFn(request, requestDto);
+        }
+
+        public Task<object> ExecuteAsync(object requestDto, IRequest request)
+        {
+            var requestType = requestDto.GetType();
+
+            if (appHost.Config.EnableAccessRestrictions)
+            {
+                AssertServiceRestrictions(requestType,
+                    request != null ? request.RequestAttributes : RequestAttributes.None);
+            }
+
+            ServiceExecFn handlerFn = GetService(requestType);
+            var response = handlerFn(request, requestDto);
+
+            var taskResponse = response as Task;
+            if (taskResponse != null)
+            {
+                return taskResponse.ContinueWith(x => x.GetResult());
+            }
+
+            return response.AsTaskResult();
         }
 
         public ServiceExecFn GetService(Type requestType)

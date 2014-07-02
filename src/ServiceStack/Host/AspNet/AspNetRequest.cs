@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.IO;
 using System.Net;
 using System.Web;
@@ -33,7 +32,14 @@ namespace ServiceStack.Host.AspNet
             this.OperationName = operationName;
             this.RequestAttributes = requestAttributes;
             this.request = httpContext.Request;
-            this.response = new AspNetResponse(httpContext.Response);
+            try
+            {
+                this.response = new AspNetResponse(httpContext.Response);
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex.Message, ex);
+            }
 
             this.RequestPreferences = new RequestPreferences(httpContext);
         }

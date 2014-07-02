@@ -176,25 +176,9 @@ namespace ServiceStack
                 return NonRootModeDefaultHttpHandler;
             }
 
-            if (mode != null && pathInfo.EndsWith(mode))
-            { 
-                var requestPath = context.Request.Path.ToLower();
-                if (requestPath == "/" + mode
-                    || requestPath == mode
-                    || requestPath == mode + "/")
-                {
-                    var pathProvider = appHost.VirtualPathProvider;
-
-                    var defaultDoc = pathProvider.CombineVirtualPath(context.Request.PhysicalPath, DefaultRootFileName ?? "");
-                    if (context.Request.PhysicalPath != WebHostPhysicalPath
-                        || !pathProvider.FileExists(defaultDoc))
-                    {
-                        return new IndexPageHttpHandler();
-                    }
-                }
-
-                var okToServe = ShouldAllow(context.Request.FilePath);
-                return okToServe ? DefaultHttpHandler : ForbiddenHttpHandler;
+            if (mode != null && pathInfo.EndsWith("/" + mode))
+            {
+                return ReturnDefaultHandler(httpReq);
             }
 
             return GetHandlerForPathInfo(
@@ -259,41 +243,40 @@ namespace ServiceStack
 
                 if (mode == null)
                     return DefaultHttpHandler;
-                 
+
                 if (DefaultRootFileName != null)
                     return StaticFileHandler;
 
                 return NonRootModeDefaultHttpHandler;
             }
 
-            if (mode != null && pathInfo.EndsWith(mode))
+            if (mode != null && pathInfo.EndsWith("/" + mode))
             {
-                var requestPath = pathInfo;
-                if (requestPath == "/" + mode
-                    || requestPath == mode
-                    || requestPath == mode + "/")
-                {
-                    var pathProvider = HostContext.VirtualPathProvider;
-
-                    var defaultDoc = pathProvider.GetFile(DefaultRootFileName ?? "");
-                    if (httpReq.GetPhysicalPath() != WebHostPhysicalPath
-                        || defaultDoc == null)
-                    {
-                        return new IndexPageHttpHandler();
-                    }
-                }
-
-                var okToServe = ShouldAllow(httpReq.GetPhysicalPath());
-                return okToServe ? DefaultHttpHandler : ForbiddenHttpHandler;
+                return ReturnDefaultHandler(httpReq);
             }
 
             return GetHandlerForPathInfo(httpReq.HttpMethod, pathInfo, pathInfo, httpReq.GetPhysicalPath())
                    ?? NotFoundHttpHandler;
         }
 
+        private static IHttpHandler ReturnDefaultHandler(IHttpRequest httpReq)
+        {
+            var pathProvider = HostContext.VirtualPathProvider;
+
+            var defaultDoc = pathProvider.GetFile(DefaultRootFileName ?? "");
+            if (httpReq.GetPhysicalPath() != WebHostPhysicalPath
+                || defaultDoc == null)
+            {
+                return new IndexPageHttpHandler();
+            }
+
+            var okToServe = ShouldAllow(httpReq.GetPhysicalPath());
+            return okToServe ? DefaultHttpHandler : ForbiddenHttpHandler;
+        }
+
         internal static IHttpHandler ReturnRequestInfo(IHttpRequest httpReq)
         {
-            if ((HostContext.DebugMode 
+            if ((HostContext.DebugMode
                 || HostContext.Config.AdminAuthSecret != null)
                 && httpReq.QueryString["debug"] == RequestInfoHandler.RestPath)
             {
@@ -330,7 +313,7 @@ namespace ServiceStack
 
             string contentType;
             var restPath = RestHandler.FindMatchingRestPath(httpMethod, pathInfo, out contentType);
-            if (restPath != null) 
+            if (restPath != null)
                 return new RestHandler { RestPath = restPath, RequestName = restPath.RequestType.GetOperationName(), ResponseContentType = contentType };
 
             var existingFile = pathParts[0].ToLower();
@@ -355,20 +338,20 @@ namespace ServiceStack
                         }
                     }
                 }
-                
+
                 //e.g. CatchAllHandler to Process Markdown files
                 var catchAllHandler = GetCatchAllHandlerIfAny(httpMethod, pathInfo, filePath);
                 if (catchAllHandler != null) return catchAllHandler;
 
                 if (!isFileRequest)
                 {
-                    return appHost.VirtualPathProvider.DirectoryExists(pathInfo) 
-                        ? StaticFileHandler 
+                    return appHost.VirtualPathProvider.DirectoryExists(pathInfo)
+                        ? StaticFileHandler
                         : NotFoundHttpHandler;
                 }
 
-                return ShouldAllow(requestPath) 
-                    ? StaticFileHandler 
+                return ShouldAllow(requestPath)
+                    ? StaticFileHandler
                     : ForbiddenHttpHandler;
             }
 

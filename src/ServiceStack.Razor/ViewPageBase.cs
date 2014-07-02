@@ -93,6 +93,11 @@ namespace ServiceStack.Razor
         }
 
         //With HTML encoding
+        public virtual void WriteTo(TextWriter writer, object obj)
+        {
+            writer.Write(HtmlEncode(obj));
+        }
+
         public virtual void WriteTo(TextWriter writer, HelperResult value)
         {
             if (value != null)
@@ -460,6 +465,12 @@ namespace ServiceStack.Razor
 
         public virtual void Dispose()
         {
+            try
+            {
+                if (this.ChildPage != null) this.ChildPage.Dispose();
+                this.ChildPage = null;
+            }
+            catch { }
             try
             {
                 if (cache != null) cache.Dispose();

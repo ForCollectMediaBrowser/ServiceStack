@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 
@@ -10,6 +11,7 @@ namespace ServiceStack
         TResponse Get<TResponse>(IReturn<TResponse> requestDto);
         TResponse Get<TResponse>(object requestDto);
         TResponse Get<TResponse>(string relativeOrAbsoluteUrl);
+        IEnumerable<TResponse> GetLazy<TResponse>(IReturn<QueryResponse<TResponse>> queryDto);
 
         HttpWebResponse Delete(IReturnVoid requestDto);
         HttpWebResponse Delete(object requestDto);
@@ -44,14 +46,8 @@ namespace ServiceStack
         HttpWebResponse Head(object requestDto);
         HttpWebResponse Head(string relativeOrAbsoluteUrl);
 
-#if !(NETFX_CORE || SL5 || PCL)
-        TResponse PostFile<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, string mimeType);
-#endif
         TResponse PostFile<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, string mimeType);
-
-#if !(NETFX_CORE || SL5 || PCL)
-        TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, FileInfo fileToUpload, object request, string fieldName = "upload");
-#endif
+        TResponse PostFileWithRequest<TResponse>(Stream fileToUpload, string fileName, object request, string fieldName = "upload");
         TResponse PostFileWithRequest<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, object request, string fieldName = "upload");
     }
 }

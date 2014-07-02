@@ -175,9 +175,7 @@ namespace ServiceStack
         {
             webRequest.Accept = string.Format("{0}, */*", ContentType);
 
-            //Methods others than GET and POST are only supported by Client request creator, see
-            //http://msdn.microsoft.com/en-us/library/cc838250(v=vs.95).aspx
-            if (this.EmulateHttpViaPost && httpMethod != "GET" && httpMethod != "POST")
+            if (this.EmulateHttpViaPost)
             {
                 webRequest.Method = "POST";
                 webRequest.Headers[HttpHeaders.XHttpMethodOverride] = httpMethod;
@@ -189,16 +187,19 @@ namespace ServiceStack
 
             PclExportClient.Instance.AddHeader(webRequest, Headers);
 
+            //EmulateHttpViaPost is also forced for SL5 clients sending non GET/POST requests
             PclExport.Instance.Config(webRequest, userAgent: UserAgent);
 
-            if (this.Credentials != null) webRequest.Credentials = this.Credentials;
-            if (this.AlwaysSendBasicAuthHeader) webRequest.AddBasicAuth(this.UserName, this.Password);
+            if (this.Credentials != null) 
+                webRequest.Credentials = this.Credentials;
+            if (this.AlwaysSendBasicAuthHeader) 
+                webRequest.AddBasicAuth(this.UserName, this.Password);
 
             ApplyWebRequestFilters(webRequest);
 
             try
             {
-                if (httpMethod.HasRequestBody() && request != null)
+                if (webRequest.Method.HasRequestBody())
                 {
                     webRequest.ContentType = ContentType;
                     webRequest.BeginGetRequestStream(RequestCallback<TResponse>, state);
@@ -223,7 +224,11 @@ namespace ServiceStack
                 var req = requestState.WebRequest;
 
                 var stream = req.EndGetRequestStream(asyncResult);
-                StreamSerializer(null, requestState.Request, stream);
+
+                if (requestState.Request != null)
+                {
+                    StreamSerializer(null, requestState.Request, stream);
+                }
 
                 stream.EndWriteStream();
 

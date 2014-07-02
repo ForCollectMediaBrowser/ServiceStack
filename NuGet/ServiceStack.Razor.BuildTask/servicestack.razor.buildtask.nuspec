@@ -20,10 +20,11 @@
     <language>en-US</language>
     <copyright>Copyright 2013 Service Stack</copyright>
     <dependencies>
+      <dependency id="ServiceStack.Razor" version="4.0" />
     </dependencies>
   </metadata>
   <files>
+    <file src="build\**\*.*" target="build" />
     <file src="tools\**\*.*" target="tools" />
-    <file src="..\..\src\ServiceStack.Razor.BuildTask\**\*.cs" target="src" />
   </files>
 </package>

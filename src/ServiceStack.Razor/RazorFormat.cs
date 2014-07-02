@@ -14,7 +14,7 @@ namespace ServiceStack.Razor
 {
     using System.Reflection;
 
-    public class RazorFormat : IPlugin, IRazorPlugin, IRazorConfig, IPreInitPlugin
+    public class RazorFormat : IPlugin, IRazorPlugin, IRazorConfig
     {
         public const string TemplatePlaceHolder = "@RenderBody()";
 
@@ -30,6 +30,7 @@ namespace ServiceStack.Razor
 
             Deny = new List<Predicate<string>> {
                 DenyPathsWithLeading_,
+                DenyDirectAccessToViews
             };
 
             LoadFromAssemblies = new List<Assembly>();
@@ -56,6 +57,11 @@ namespace ServiceStack.Razor
             return Path.GetFileName(path).StartsWith("_");
         }
 
+        static bool DenyDirectAccessToViews(string path)
+        {
+            return path.StartsWithIgnoreCase("/views");
+        }
+
         public bool WatchForModifiedPages
         {
             get { return EnableLiveReload.GetValueOrDefault(); }
@@ -65,11 +71,6 @@ namespace ServiceStack.Razor
         //managers
         protected RazorViewManager ViewManager;
         protected RazorPageResolver PageResolver;
-
-        public void Configure(IAppHost appHost)
-        {
-            LoadFromAssemblies.Each(appHost.Config.EmbeddedResourceSources.AddIfNotExists);
-        }
 
         public void Register(IAppHost appHost)
         {
@@ -218,7 +219,11 @@ namespace ServiceStack.Razor
         public string RenderToHtml(RazorPage razorPage, object model = null, string layout = null)
         {
             IRazorView razorView;
-            return RenderToHtml(razorPage, out razorView, model: model, layout: layout);
+            var result = RenderToHtml(razorPage, out razorView, model: model, layout: layout);
+            using (razorView)
+            {
+                return result;
+            }
         }
 
         public string RenderToHtml(RazorPage razorPage, out IRazorView razorView, object model = null, string layout = null)

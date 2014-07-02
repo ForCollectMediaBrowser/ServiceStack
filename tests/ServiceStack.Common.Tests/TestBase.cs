@@ -181,6 +181,11 @@ namespace ServiceStack.Common.Tests
                 return parent.ExecutePath<TResponse>(HttpMethods.Get, new UrlParts(relativeOrAbsoluteUrl), null);
             }
 
+            public IEnumerable<TResponse> GetLazy<TResponse>(IReturn<QueryResponse<TResponse>> queryDto)
+            {
+                throw new NotImplementedException();
+            }
+
             public HttpWebResponse Delete(object requestDto)
             {
                 throw new NotImplementedException();
@@ -337,6 +342,12 @@ namespace ServiceStack.Common.Tests
             }
 
             public TResponse PostFile<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, string mimeType)
+            {
+                throw new NotImplementedException();
+            }
+
+            public TResponse PostFileWithRequest<TResponse>(
+                Stream fileToUpload, string fileName, object request, string fieldName = "upload")
             {
                 throw new NotImplementedException();
             }

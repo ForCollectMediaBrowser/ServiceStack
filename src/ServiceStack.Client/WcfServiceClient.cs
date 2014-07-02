@@ -1,5 +1,6 @@
 #if !(NETFX_CORE || SL5 || __IOS__ || ANDROID || PCL)
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Runtime.Serialization;
@@ -362,6 +363,11 @@ namespace ServiceStack
             throw new NotImplementedException();
         }
 
+        public IEnumerable<TResponse> GetLazy<TResponse>(IReturn<QueryResponse<TResponse>> queryDto)
+        {
+            throw new NotImplementedException();
+        }
+
         public HttpWebResponse Delete(IReturnVoid requestDto)
         {
             throw new NotImplementedException();
@@ -503,6 +509,12 @@ namespace ServiceStack
         }
 
         public TResponse PostFile<TResponse>(string relativeOrAbsoluteUrl, Stream fileToUpload, string fileName, string mimeType)
+        {
+            throw new NotImplementedException();
+        }
+
+        public TResponse PostFileWithRequest<TResponse>(
+            Stream fileToUpload, string fileName, object request, string fieldName = "upload")
         {
             throw new NotImplementedException();
         }

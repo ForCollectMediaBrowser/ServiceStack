@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.Serialization;
 using System.Web;
 using System.Web.Hosting;
@@ -117,6 +118,9 @@ namespace ServiceStack.Host.Handlers
         public string ErrorMessage { get; set; }
 
         [DataMember]
+        public Dictionary<string, string> LogonUserInfo { get; set; }
+
+        [DataMember]
         public string DebugString { get; set; }
 
         [DataMember]
@@ -139,6 +143,9 @@ namespace ServiceStack.Host.Handlers
 
         [DataMember]
         public Dictionary<string, string> Stats { get; set; }
+
+        [DataMember]
+        public List<string> VirtualPathProviderFiles { get; set; }
     }
 
     public class RequestHandlerInfo
@@ -181,6 +188,26 @@ namespace ServiceStack.Host.Handlers
                 response.ApplicationVirtualPath = HostingEnvironment.ApplicationVirtualPath;
                 response.VirtualAbsolutePathRoot = VirtualPathUtility.ToAbsolute("/");
                 response.VirtualAppRelativePathRoot = VirtualPathUtility.ToAppRelative("/");
+                var userIdentity = aspReq.LogonUserIdentity;
+                if (userIdentity != null)
+                {
+                    response.LogonUserInfo = new Dictionary<string, string> {
+                        { "Name", userIdentity.Name },
+                        { "AuthenticationType", userIdentity.AuthenticationType },
+                        { "IsAuthenticated", userIdentity.IsAuthenticated.ToString() },
+                        { "IsAnonymous", userIdentity.IsAnonymous.ToString() },
+                        { "IsGuest", userIdentity.IsGuest.ToString() },
+                        { "IsSystem", userIdentity.IsSystem.ToString() },
+                        { "Groups", userIdentity.Groups.Map(x => x.Value).Join(", ") },
+                    };
+                    var winUser = userIdentity.User;
+                    if (winUser != null)
+                    {
+                        response.LogonUserInfo["User"] = winUser.Value;
+                        response.LogonUserInfo["User.AccountDomainSid"] = winUser.AccountDomainSid.ToString();
+                        response.LogonUserInfo["User.IsAccountSid"] = winUser.IsAccountSid().ToString();
+                    }
+                }
             }
 
             var json = JsonSerializer.SerializeToString(response);
@@ -237,6 +264,7 @@ namespace ServiceStack.Host.Handlers
                 PluginsLoaded = HostContext.AppHost.PluginsLoaded,
                 StartUpErrors = HostContext.AppHost.StartUpErrors,
                 LastRequestInfo = LastRequestInfo,
+                VirtualPathProviderFiles = HostContext.AppHost.VirtualPathProvider.GetAllMatchingFiles("*").Take(1000).Map(x => x.RealPath),
                 Stats = new Dictionary<string, string> {
                     {"RawHttpHandlers", HostContext.AppHost.RawHttpHandlers.Count.ToString() },
                     {"PreRequestFilters", HostContext.AppHost.PreRequestFilters.Count.ToString() },
@@ -252,7 +280,8 @@ namespace ServiceStack.Host.Handlers
                     {"RestPaths", HostContext.AppHost.RestPaths.Count.ToString() },
                     {"ContentTypes", HostContext.AppHost.ContentTypes.ContentTypeFormats.Count.ToString() },
                     {"EnableFeatures", HostContext.Config.EnableFeatures.ToString() },
-                }
+                    {"VirtualPathProvider", HostContext.AppHost.VirtualPathProvider.ToString() }
+                },
             };
             return response;
         }

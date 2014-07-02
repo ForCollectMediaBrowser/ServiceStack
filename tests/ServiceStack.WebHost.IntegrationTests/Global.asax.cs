@@ -97,19 +97,16 @@ namespace ServiceStack.WebHost.IntegrationTests
                 Plugins.Add(new ValidationFeature());
                 Plugins.Add(new SessionFeature());
                 Plugins.Add(new ProtoBufFormat());
-                Plugins.Add(new SwaggerFeature());
                 Plugins.Add(new RequestLogsFeature());
+                Plugins.Add(new SwaggerFeature());
+                Plugins.Add(new PostmanFeature());
+                Plugins.Add(new CorsFeature());
 
                 container.RegisterValidators(typeof(CustomersValidator).Assembly);
 
 
                 //var onlyEnableFeatures = Feature.All.Remove(Feature.Jsv | Feature.Soap);
                 SetConfig(new HostConfig {
-                    GlobalResponseHeaders = {
-                        { "Access-Control-Allow-Origin", "*" },
-                        { "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS" },
-                        { "Access-Control-Allow-Headers", "Content-Type, X-Requested-With" },
-                    },
                     AdminAuthSecret = AuthTestsBase.AuthSecret,
                     //EnableFeatures = onlyEnableFeatures,
                     DebugMode = true, //Show StackTraces for easier debugging

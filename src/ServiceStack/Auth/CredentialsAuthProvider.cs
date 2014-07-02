@@ -42,7 +42,9 @@ namespace ServiceStack.Auth
             {
                 AssertNotLocked(userAuth);
 
-                session.PopulateWith(userAuth);
+                var holdSessionId = session.Id;
+                session.PopulateWith(userAuth); //overwrites session.Id
+                session.Id = holdSessionId;
                 session.IsAuthenticated = true;
                 session.UserAuthId = userAuth.Id.ToString(CultureInfo.InvariantCulture);
                 session.ProviderOAuthAccess = authRepo.GetUserAuthDetails(session.UserAuthId)
@@ -95,7 +97,9 @@ namespace ServiceStack.Auth
                     session.UserAuthName = userName;
                 }
 
-                OnAuthenticated(authService, session, null, null);
+                var response = OnAuthenticated(authService, session, null, null);
+                if (response != null)
+                    return response;
 
                 return new AuthenticateResponse
                 {
@@ -108,7 +112,7 @@ namespace ServiceStack.Auth
             throw HttpError.Unauthorized("Invalid UserName or Password");
         }
 
-        public override void OnAuthenticated(IServiceBase authService, IAuthSession session, IAuthTokens tokens, Dictionary<string, string> authInfo)
+        public override IHttpResult OnAuthenticated(IServiceBase authService, IAuthSession session, IAuthTokens tokens, Dictionary<string, string> authInfo)
         {
             var userSession = session as AuthUserSession;
             if (userSession != null)
@@ -144,6 +148,10 @@ namespace ServiceStack.Auth
                 {
                     httpRes.Cookies.AddPermanentCookie(HttpHeaders.XUserAuthId, session.UserAuthId);
                 }
+
+                var failed = ValidateAccount(authService, authRepo, session, tokens);
+                if (failed != null)
+                    return failed;
             }
 
             try
@@ -155,12 +163,8 @@ namespace ServiceStack.Auth
             {
                 authService.SaveSession(session, SessionExpiry);
             }
-        }
 
-        protected virtual void AssertNotLocked(IUserAuth userAuth)
-        {
-            if (userAuth.LockedDate != null)
-                throw new AuthenticationException("This account has been locked");
+            return null;
         }
     }
 }

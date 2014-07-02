@@ -23,6 +23,7 @@ namespace ServiceStack.Auth
     {
         public const string BasicProvider = "basic";
         public const string CredentialsProvider = "credentials";
+        public const string WindowsAuthProvider = "windowsauth";
         public const string CredentialsAliasProvider = "login";
         public const string LogoutAction = "logout";
         public const string DigestProvider = "digest";
@@ -87,7 +88,7 @@ namespace ServiceStack.Auth
 
             if (ValidateFn != null)
             {
-                var validationResponse = ValidateFn(this, HttpMethods.Get, request);
+                var validationResponse = ValidateFn(this, Request.Verb, request);
                 if (validationResponse != null) return validationResponse;
             }
 
@@ -122,6 +123,9 @@ namespace ServiceStack.Auth
                 // to refresh the current session reference.
                 session = this.GetSession();
 
+                if (request.provider == null && !session.IsAuthenticated)
+                    throw HttpError.Unauthorized("Not Authenticated");
+
                 var referrerUrl = request.Continue
                     ?? session.ReferrerUrl
                     ?? this.Request.GetHeader("Referer")
@@ -131,11 +135,14 @@ namespace ServiceStack.Auth
                 response = response ?? new AuthenticateResponse {
                     UserId = session.UserAuthId,
                     UserName = session.UserAuthName,
+                    DisplayName = session.DisplayName 
+                        ?? session.UserName 
+                        ?? "{0} {1}".Fmt(session.FirstName, session.LastName).Trim(),
                     SessionId = session.Id,
                     ReferrerUrl = referrerUrl,
                 };
 
-                if (isHtml)
+                if (isHtml && request.provider != null)
                 {
                     if (alreadyAuthenticated)
                         return this.Redirect(referrerUrl.AddHashParam("s", "0"));
@@ -213,6 +220,9 @@ namespace ServiceStack.Auth
         /// </summary>
         private object Authenticate(Authenticate request, string provider, IAuthSession session, IAuthProvider oAuthConfig)
         {
+            if (request.provider == null && request.UserName == null)
+                return null; //Just return sessionInfo if no provider or username is given
+
             object response = null;
             if (!oAuthConfig.IsAuthorized(session, session.GetOAuthTokens(provider), request))
             {
