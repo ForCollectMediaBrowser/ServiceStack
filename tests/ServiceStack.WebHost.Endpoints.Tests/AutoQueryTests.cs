@@ -43,10 +43,10 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             }
 
             var autoQuery = new AutoQueryFeature
-            {
-                MaxLimit = 100,
-                EnableSqlFilters = true,
-            }
+                {
+                    MaxLimit = 100,
+                    EnableRawSqlFilters = true,
+                }
                 .RegisterQueryFilter<QueryRockstarsFilter, Rockstar>((req, q, dto) =>
                     q.And(x => x.LastName.EndsWith("son"))
                 )
@@ -99,6 +99,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
     public class QueryRockstarsConventions : QueryBase<Rockstar>
     {
+        public int[] Ids { get; set; }
         public int? AgeOlderThan { get; set; }
         public int? AgeGreaterThanOrEqualTo { get; set; }
         public int? AgeGreaterThan { get; set; }
@@ -148,20 +149,25 @@ namespace ServiceStack.WebHost.Endpoints.Tests
     {
         public string FirstName { get; set; } //default to 'AND FirstName = {Value}'
 
-        [QueryField(Format = "UPPER({Field}) LIKE UPPER({Value})", Field = "FirstName")]
-        public string FirstNameCaseInsensitive { get; set; }
-
-        [QueryField(Format = "{Field} LIKE {Value}", Field = "FirstName", ValueFormat = "{0}%")]
-        public string FirstNameStartsWith { get; set; }
-
-        [QueryField(Format = "{Field} LIKE {Value}", Field = "LastName", ValueFormat = "%{0}")]
-        public string LastNameEndsWith { get; set; }
-
-        [QueryField(Type = QueryType.Or, Format = "UPPER({Field}) LIKE UPPER({Value})", Field = "LastName")]
-        public string OrLastName { get; set; }
+        public string[] FirstNames { get; set; } //Collections default to 'FirstName IN ({Values})
 
         [QueryField(Operand = ">=")]
         public int? Age { get; set; }
+
+        [QueryField(Template = "UPPER({Field}) LIKE UPPER({Value})", Field = "FirstName")]
+        public string FirstNameCaseInsensitive { get; set; }
+
+        [QueryField(Template = "{Field} LIKE {Value}", Field = "FirstName", ValueFormat = "{0}%")]
+        public string FirstNameStartsWith { get; set; }
+
+        [QueryField(Template = "{Field} LIKE {Value}", Field = "LastName", ValueFormat = "%{0}")]
+        public string LastNameEndsWith { get; set; }
+
+        [QueryField(Template = "{Field} BETWEEN {Value1} AND {Value2}", Field = "FirstName")]
+        public string[] FirstNameBetween { get; set; }
+
+        [QueryField(Term = QueryTerm.Or, Template = "UPPER({Field}) LIKE UPPER({Value})", Field = "LastName")]
+        public string OrLastName { get; set; }
     }
 
     public class QueryFieldRockstarsDynamic : QueryBase<Rockstar>
@@ -185,7 +191,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public int? Age { get; set; }
     }
 
-    [Query(QueryType.Or)]
+    [Query(QueryTerm.Or)]
     [Route("/OrRockstars")]
     public class QueryOrRockstars : QueryBase<Rockstar>
     {
@@ -193,7 +199,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public string FirstName { get; set; }
     }
 
-    [Query(QueryType.Or)]
+    [Query(QueryTerm.Or)]
     public class QueryGetRockstars : QueryBase<Rockstar>
     {
         public int[] Ids { get; set; }
@@ -202,7 +208,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public int[] IdsBetween { get; set; }
     }
 
-    [Query(QueryType.Or)]
+    [Query(QueryTerm.Or)]
     public class QueryGetRockstarsDynamic : QueryBase<Rockstar> {}
 
     public class RockstarAlbum
@@ -222,11 +228,11 @@ namespace ServiceStack.WebHost.Endpoints.Tests
     }
 
     [Route("/movies/search")]
-    [Query(QueryType.And)] //Default
+    [Query(QueryTerm.And)] //Default
     public class SearchMovies : QueryBase<Movie> {}
 
     [Route("/movies")]
-    [Query(QueryType.Or)]
+    [Query(QueryTerm.Or)]
     public class QueryMovies : QueryBase<Movie>
     {
         public int[] Ids { get; set; }
@@ -453,6 +459,9 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             response = client.Get(new QueryFieldRockstars { FirstName = "Jim" });
             Assert.That(response.Results.Count, Is.EqualTo(1));
 
+            response = client.Get(new QueryFieldRockstars { FirstNames = new[] { "Jim","Kurt" } });
+            Assert.That(response.Results.Count, Is.EqualTo(2));
+
             response = client.Get(new QueryFieldRockstars { FirstNameCaseInsensitive = "jim" });
             Assert.That(response.Results.Count, Is.EqualTo(1));
 
@@ -461,6 +470,9 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
             response = client.Get(new QueryFieldRockstars { LastNameEndsWith = "son" });
             Assert.That(response.Results.Count, Is.EqualTo(2));
+
+            response = client.Get(new QueryFieldRockstars { FirstNameBetween = new[] {"A","F"} });
+            Assert.That(response.Results.Count, Is.EqualTo(3));
 
             response = client.Get(new QueryFieldRockstars
             {
@@ -595,7 +607,10 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         [Test]
         public void Can_execute_Explicit_conventions()
         {
-            var response = client.Get(new QueryRockstarsConventions { AgeOlderThan = 42 });
+            var response = client.Get(new QueryRockstarsConventions { Ids = new[] {1, 2, 3} });
+            Assert.That(response.Results.Count, Is.EqualTo(3));
+
+            response = client.Get(new QueryRockstarsConventions { AgeOlderThan = 42 });
             Assert.That(response.Results.Count, Is.EqualTo(3));
 
             response = client.Get(new QueryRockstarsConventions { AgeGreaterThanOrEqualTo = 42 });
@@ -778,13 +793,13 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         [Test]
         public void Can_consume_as_CSV()
         {
-            var url = Config.ListeningOn + "movies/search.csv";
+            var url = Config.ListeningOn + "movies/search.csv?ratings=G,PG-13";
             var csv = url.GetStringFromUrl();
             var headers = csv.SplitOnFirst('\n')[0].Trim();
             Assert.That(headers, Is.EqualTo("Id,ImdbId,Title,Rating,Score,Director,ReleaseDate,TagLine,Genres"));
             csv.Print();
 
-            url = Config.ListeningOn + "query/rockstars.csv";
+            url = Config.ListeningOn + "query/rockstars.csv?Age=27";
             csv = url.GetStringFromUrl();
             headers = csv.SplitOnFirst('\n')[0].Trim();
             Assert.That(headers, Is.EqualTo("Id,FirstName,LastName,Age"));

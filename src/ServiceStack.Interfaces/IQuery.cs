@@ -27,7 +27,7 @@ namespace ServiceStack
     public interface ILeftJoin<Source, Join1, Join2, Join3> : IJoin { }
     public interface ILeftJoin<Source, Join1, Join2, Join3, Join4> : IJoin { }
 
-    public enum QueryType
+    public enum QueryTerm
     {
         Default = 0,
         And = 1,
@@ -45,20 +45,20 @@ namespace ServiceStack
     {
         public QueryAttribute() {}
 
-        public QueryAttribute(QueryType defaultType)
+        public QueryAttribute(QueryTerm defaultTerm)
         {
-            DefaultType = defaultType;
+            DefaultTerm = defaultTerm;
         }
 
-        public QueryType DefaultType { get; set; }
+        public QueryTerm DefaultTerm { get; set; }
     }
 
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public class QueryFieldAttribute : AttributeBase
     {
-        public QueryType Type { get; set; }
+        public QueryTerm Term { get; set; }
         public string Operand { get; set; }
-        public string Format { get; set; }
+        public string Template { get; set; }
         public string Field { get; set; }
         public string ValueFormat { get; set; }
         public ValueStyle ValueStyle { get; set; }
@@ -68,16 +68,16 @@ namespace ServiceStack
     public abstract class QueryBase : IQuery
     {
         [DataMember(Order = 1)]
-        public int? Skip { get; set; }
+        public virtual int? Skip { get; set; }
 
         [DataMember(Order = 2)]
-        public int? Take { get; set; }
+        public virtual int? Take { get; set; }
 
         [DataMember(Order = 3)]
-        public string OrderBy { get; set; }
+        public virtual string OrderBy { get; set; }
 
         [DataMember(Order = 4)]
-        public string OrderByDesc { get; set; }
+        public virtual string OrderByDesc { get; set; }
     }
 
     public abstract class QueryBase<T> : QueryBase, IQuery<T>, IReturn<QueryResponse<T>> { }
@@ -88,18 +88,18 @@ namespace ServiceStack
     public class QueryResponse<T> : IHasResponseStatus, IMeta
     {
         [DataMember(Order = 1)]
-        public int Offset { get; set; }
+        public virtual int Offset { get; set; }
 
         [DataMember(Order = 2)]
-        public int Total { get; set; }
+        public virtual int Total { get; set; }
 
         [DataMember(Order = 3)]
-        public List<T> Results { get; set; }
+        public virtual List<T> Results { get; set; }
 
         [DataMember(Order = 4)]
-        public Dictionary<string, string> Meta { get; set; }
+        public virtual Dictionary<string, string> Meta { get; set; }
 
         [DataMember(Order = 5)]
-        public ResponseStatus ResponseStatus { get; set; }
+        public virtual ResponseStatus ResponseStatus { get; set; }
     }
 }
