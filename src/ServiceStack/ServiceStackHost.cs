@@ -24,6 +24,7 @@ using ServiceStack.Metadata;
 using ServiceStack.MiniProfiler.UI;
 using ServiceStack.NativeTypes;
 using ServiceStack.Serialization;
+using ServiceStack.Text;
 using ServiceStack.VirtualPath;
 using ServiceStack.Web;
 using ServiceStack.Redis;
@@ -464,7 +465,6 @@ namespace ServiceStack
         private void ConfigurePlugins()
         {
             //Some plugins need to initialize before other plugins are registered.
-
             foreach (var plugin in Plugins)
             {
                 var preInitPlugin = plugin as IPreInitPlugin;
@@ -493,6 +493,22 @@ namespace ServiceStack
             Config.PreferredContentTypes.Insert(0, Config.DefaultContentType);
 
             Config.PreferredContentTypesArray = Config.PreferredContentTypes.ToArray();
+
+            foreach (var plugin in Plugins)
+            {
+                var preInitPlugin = plugin as IPostInitPlugin;
+                if (preInitPlugin != null)
+                {
+                    try
+                    {
+                        preInitPlugin.AfterPluginsLoaded(this);
+                    }
+                    catch (Exception ex)
+                    {
+                        OnStartupException(ex);
+                    }
+                }
+            }
 
             ServiceController.AfterInit();
         }
@@ -692,6 +708,8 @@ namespace ServiceStack
                 Container.Dispose();
                 Container = null;
             }
+
+            JsConfig.Reset(); //Clears Runtime Attributes
 
             Instance = null;
         }

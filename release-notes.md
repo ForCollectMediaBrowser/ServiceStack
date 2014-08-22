@@ -1,6 +1,485 @@
-# Release Notes
+## v4.0.30 Release Notes
 
-## v4.0.23 Release Notes
+## [Add ServiceStack Reference](https://github.com/ServiceStack/ServiceStack/wiki/Add-ServiceStack-Reference)
+
+We have an exciting feature in this release showcasing our initial support for generating Native Types from client VS.NET projects using [ServiceStackVS](https://github.com/ServiceStack/ServiceStack/wiki/Creating-your-first-project#step-1-download-and-install-servicestackvs) new **Add ServiceStack Reference** feature. It provides a simpler, cleaner and more versatile alternative to WCF's **Add Service Reference** in VS.NET. 
+
+Our goal with Native Types is to provide an alternative for sharing DTO dlls, that can enable a better dev workflow for external clients who are now able to generate (and update) Typed APIs for your Services from a remote url - reducing the burden and effort required to consume ServiceStack Services whilst benefiting from clients native language strong-typing feedback.
+
+This is just the beginning, whilst C# is the first language supported it lays the groundwork and signals our approach on adding support for typed API's in other languages in future. Add a [feature request for your favorite language](http://servicestack.uservoice.com/forums/176786-feature-requests) to prioritize support for it sooner!
+
+### Example Usage
+
+The easiest way to Add a ServiceStack reference to your project is to right-click on your project to bring up [ServiceStackVS's](https://github.com/ServiceStack/ServiceStack/wiki/Creating-your-first-project) `Add ServiceStack Reference` context-menu item. This opens a dialog where you can add the url of the ServiceStack instance you want to typed DTO's for, as well as the name of the T4 template that's added to your project.
+
+![Add ServiceStack Reference](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/apps/StackApis/add-service-ref-flow.png)
+
+After clicking OK, the servers DTO's and [ServiceStack.Client](https://www.nuget.org/packages/ServiceStack.Client) NuGet package are added to the project, providing an instant typed API:
+
+![Calling ServiceStack Service](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/apps/StackApis/call-service.png)
+
+### Consuming Services from Mobile Clients now Easier than Ever!
+
+In addition with our improved PCL Support in this release, it's never been easier to create an instant Typed API for a remote Service consumable from any Xamarin.Android, Xamarin.iOS, Silverlgiht 5, Windows Store or .full NET4.0+ platforms - Here's a quick demo of it working in Android:
+
+![Android Add ServiceStack Reference](https://raw.githubusercontent.com/ServiceStack/ServiceStackVS/master/Images/android-add-ref-demo.gif)
+
+### Advantages over WCF
+
+ - **Simple** Uses a small T4 template to save generated POCO Types. Updating as easy as re-running T4 template
+ - **Versatile** Clean DTOs works in all JSON, XML, JSV, MsgPack and ProtoBuf [generic service clients](https://github.com/ServiceStack/ServiceStack/wiki/C%23-client#built-in-clients)
+ - **Reusable** Generated DTO's are not coupled to any endpoint or format. Defaults are both partial and virtual for maximum re-use 
+ - **Resilient** Messaging-based services offer a number of [advantages over RPC Services](https://github.com/ServiceStack/ServiceStack/wiki/Advantages-of-message-based-web-services)
+ - **Flexible** DTO generation is customizable, Server and Clients can override built-in defaults
+ - **Integrated** Rich Service metadata annotated on DTO's, [Internal Services](https://github.com/ServiceStack/ServiceStack/wiki/Restricting-Services) are excluded when accessed externally
+
+### Available from v4.0.30+ ServiceStack Projects
+
+Native Types is now available by default on all **v4.0.30+** ServiceStack projects. It can be disabled by removing the `NativeTypesFeature` plugin with:
+
+```csharp
+Plugins.RemoveAll(x => x is NativeTypesFeature);
+```
+
+For detailed info on how NativeTypesFeature works, its different customization options and improvements over WCF, checkout the [Add ServiceStack Reference](https://github.com/ServiceStack/ServiceStack/wiki/Add-ServiceStack-Reference) docs.
+
+### [Upgrade ServiceStackVS](https://github.com/ServiceStack/ServiceStack/wiki/Creating-your-first-project)
+
+To take advantage of this feature [Upgrade or Install ServiceStackVS](https://github.com/ServiceStack/ServiceStack/wiki/Creating-your-first-project) VS.NET Extension. If you already have **ServiceStackVS** installed, uninstall it first from `Tools -> Extensions and Updates... -> ServiceStackVS -> Uninstall`.
+
+## Improved PCL Story
+
+Our [PCL Story](https://github.com/ServiceStackApps/HelloMobile) has been greatly improved in this release now that `ServiceStack.Interfaces` has been converted into a pure PCL dll. This now lets you maintain your server DTO's in a pure PCL DLL that can be shared as-is on most supported platforms (Profile136):
+
+ - Xamarin.iOS
+ - Xamarin.Android
+ - Windows Store
+ - WPF app using .NET 4.0 PCL support
+ - Silverlight 5
+
+Whilst our impl-free `ServiceStack.Interfaces.dll` was able to be converted into a pure PCL dll, our Client libraries have instead resorted to using [PCL's Bait and Switch technique](http://log.paulbetts.org/the-bait-and-switch-pcl-trick/) to provide platform-specific extensions and optimizations. The one outlier is Silverlight5 which remains a custom (non-PCL) SL5 build, that whilst can now share DTO's, still can't support projects with dependencies on the PCL-compatible version of **ServiceStack.Client**. 
+
+As of this release all PCL, platform and Silverlight dlls are now merged into the main [ServiceStack.Client](https://www.nuget.org/packages/ServiceStack.Client) NuGet packages so now any clients need only reference the main Client NuGet package:
+
+```
+Install-Package ServiceStack.Client
+``` 
+
+The [Hello PCL](https://github.com/ServiceStackApps/HelloMobile) project now contains examples of reusing a Server DTO project with all supported client platforms as well as showing re-use of a high-level `SharedGateway` which referenes `ServiceStack.Client` that's shared between all PCL-compatible platforms. 
+
+### New ServiceStack + AngularJS Example - [StackApis](http://stackapis.servicestack.net)
+
+[![StackApis Home](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/apps/StackApis/stackapis-home.png)](http://stackapis.servicestack.net/)
+
+[StackApis](http://stackapis.servicestack.net/) is a simple new ServiceStack + AngularJS example project created with [ServiceStackVS AngularJS Template](https://github.com/ServiceStack/ServiceStackVS#servicestackvs) showcasing how quick and easy it is to create responsive feature-rich Single Page Apps with AngularJS and [AutoQuery](https://github.com/ServiceStack/ServiceStack/wiki/Auto-Query). StackApis is powered by a Sqlite database containing [snapshot of ServiceStack questions from StackOverflow APIs](https://github.com/ServiceStackApps/StackApis/blob/master/src/StackApis.Tests/UnitTests.cs#L67) that's [persisted in an sqlite database](https://github.com/ServiceStackApps/StackApis/blob/master/src/StackApis.Tests/UnitTests.cs#L119-L124) using [OrmLite](https://github.com/ServiceStack/ServiceStack.OrmLite/).
+
+### StackApis AutoQuery Service
+
+The [Home Page](https://github.com/ServiceStackApps/StackApis/blob/master/src/StackApis/default.cshtml) is built with less than **<50 Lines** of JavaScript which thanks to [AutoQuery](https://github.com/ServiceStack/ServiceStack/wiki/Auto-Query) routes all requests to the single AutoQuery Service below:
+
+```csharp
+[Route("/questions")]
+public class StackOverflowQuery : QueryBase<Question>
+{
+    public int? ScoreGreaterThan { get; set; }
+}
+```
+
+> Not even `ScoreGreaterThan` is a required property, it's just an example of a [formalized convention](https://github.com/ServiceStack/ServiceStack/wiki/Auto-Query#advantages-of-well-defined-service-contracts) enabling queries from Typed Service Clients.
+
+Feel free to play around with a deployed version of StackApis at [stackapis.servicestack.net](http://stackapis.servicestack.net/).
+
+You can also use the public `http://stackapis.servicestack.net/` url to test out ServiceStack's new **Add ServiceStack Reference** feature :)
+
+## [Swagger Support](https://github.com/ServiceStack/ServiceStack/wiki/Swagger-API)
+
+### All static resources are now embedded 
+
+ServiceStack's [Swagger Support](https://github.com/ServiceStack/ServiceStack/wiki/Swagger-API) received some welcomed enhancements thanks to [@tvjames](https://github.com/tvjames) and [@tyst](https://github.com/tyst)'s efforts which now sees all of Swagger's static resources embedded into a single `ServiceStack.Api.Swagger.dll`, taking advantage of the Virtual File Systems [transparent support for Embedded Resources](https://github.com/ServiceStack/ServiceStack.Gap#creating-an-embedded-servicestack-app), making it easier to manage and upgrade Swagger as a self-contained unit.
+
+### New Bootstrap theme for Swagger
+
+A new attractive Bootstrap Theme was also added to Swagger, available from [/swagger-ui-bootstrap/](http://stackapis.servicestack.net/swagger-ui-bootstrap/):
+
+[![Swagger Bootstrap](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/apps/StackApis/stackapis-swagger-bootstrap.png)](http://stackapis.servicestack.net/swagger-ui-bootstrap/)
+
+You can change the [metadata page plugin link](https://github.com/ServiceStack/ServiceStack/wiki/Metadata-page#adding-links-to-metadata-page) to point to this new theme with:
+
+```csharp
+Plugins.Add(new SwaggerFeature {
+    UseBootstrapTheme = true, 
+    LogoUrl = "your-logo.png" //optional use your own logo
+});
+```
+
+Swagger was also been updated to the latest version.
+
+## Authentication
+
+### Unique Emails
+
+ServiceStack now verifies emails returned by OAuth providers are now unique where if there's already another UserAuth with an existing email, authentication will fail and redirect (for HTML/Web Browser requests) with the Error token: 
+
+    /#f=EmailAlreadyExists
+
+This behavior is in-line with ServiceStack's other AuthProviders. If this change causes any issues, it can be disabled with:
+
+```csharp
+AuthProvider.ValidateUniqueEmails = false;
+```
+
+> This doesn't apply to Users who login with multiple OAuth Providers as there accounts automatically get merged into a single UserAuth entity.
+
+### CustomValidationFilter
+
+A new `CustomValidationFilter` was added to all AuthProviders which can be used to return a `IHttpResult` to control what error response is returned, e.g: 
+
+```csharp
+Plugins.Add(new AuthFeature(
+    () => new CustomUserSession(), 
+    new IAuthProvider[] {
+        new FacebookAuthProvider(appSettings) { 
+            CustomValidationFilter = authCtx => 
+                CustomIsValid(authCtx) 
+                    ? authCtx.Service.Redirect(authCtx.Session.ReferrerUrl
+                        .AddHashParam("f","CustomErrorCode"))
+                    : null,
+        },
+    }));
+```
+
+## Breaking Changes
+
+### Upgrade all ServiceStack NuGet packages
+
+The primary breaking change was converting ServiceStack's core `ServiceStack.Interfaces.dll` into a pure portable class library which as it's incompatible with the previous non-PCL ServiceStack.Interfaces.dll requires that all NuGet dependenices (inc. transitive dependencies) be upgraded to **v4.0.30**. The version number was bumped to **v4.0.30** specifically to stress that it's incompatible with any **<v4.0.2x** before it. The only other issue we ran into after upgrading most of ServiceStack projects is on projects that reference or mock Interfaces that reference a `System.Net.*` Type like `HttpWebResponse` in `IServiceClient` will now require an explicit reference to `System.Net` for the C# compiler to consider them to be of the same type.
+
+In summary if you have a build error when upgrading v4.0.30 then:
+  - Delete any older v4.0.2x SS packages from NuGet /packages
+  - Reference `System.Net` on projects that still have build errors
+
+More details about these issues is available on the [announcement post](https://plus.google.com/+DemisBellot/posts/SyVJR419sdE).
+
+### TypeDescriptor support removed 
+
+In order to convert ServiceStack.Interfaces into a portable class library we've had to remove support for an undocumented feature allowing adding of Attributes via .NET's TypeDescriptor. If you were using TypeDescriptor, you can switch to adding attributes dynamically using [ServiceStack's Reflection APIs](https://github.com/ServiceStack/ServiceStack.Text/blob/master/tests/ServiceStack.Text.Tests/AttributeTests.cs).
+
+# v4.0.24 Release Notes
+
+## [Server Events](https://github.com/ServiceStackApps/Chat)
+
+In keeping with our quest to provide a simple, lean and deep integrated technology stack for all your web framework needs we've added support in this release for Server push communications with our initial support for [Server Sent Events](http://www.html5rocks.com/en/tutorials/eventsource/basics/). 
+
+[Server Sent Events](http://www.html5rocks.com/en/tutorials/eventsource/basics/) (SSE) is an elegant [web technology](http://dev.w3.org/html5/eventsource/) for efficiently receiving push notifications from any HTTP Server. It can be thought of as a mix between long polling and one-way WebSockets and contains many benefits over each:
+
+  - **Simple** - Server Sent Events is just a single long-lived HTTP Request that any HTTP Server and Web Framework can support
+  - **Efficient** - Each client uses a single TCP connection and each message avoids the overhead of HTTP Connections and Headers that's [often faster than Web Sockets](http://matthiasnehlsen.com/blog/2013/05/01/server-sent-events-vs-websockets/).
+  - **Resilient** - Browsers automatically detect when a connection is broken and automatically reconnects
+  - **Interoperable** - As it's just plain-old HTTP, it's introspectable with your favorite HTTP Tools and even works through HTTP proxies (with buffering and checked-encoding off).
+  - **Well Supported** - As a Web Standard it's supported in all major browsers except for IE which [can be enabled with polyfills](http://html5doctor.com/server-sent-events/#yaffle).
+
+Server Events provides a number of API's that allow sending messages to:
+
+  - All Users
+  - All Users subscribed to a channel
+  - A Single Users Subscription
+
+It also includes deep integration with ServiceStack's [Sessions](https://github.com/ServiceStack/ServiceStack/wiki/Sessions) and [Authentication Providers](https://github.com/ServiceStack/ServiceStack/wiki/Authentication-and-authorization) which also sending messages to uses using either:
+
+  - UserAuthId
+  - UserName
+  - Permanent Session Id (ss-pid)
+
+### Registering
+
+List most other [modular functionality](https://github.com/ServiceStack/ServiceStack/wiki/Plugins) in ServiceStack, Server Sent Events is encapsulated in a single Plugin that can be registered in your AppHost with:
+
+```csharp
+Plugins.Add(new ServerEventsFeature());
+```
+
+### [ServiceStack Chat (beta)](https://github.com/ServiceStackApps/Chat)
+
+[![Chat Overview](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/apps/Chat/chat-overview.gif)](https://github.com/ServiceStackApps/Chat)
+
+To demonstrate how to make use Server Events we've created a cursory Chat web app for showcasing server push notifications packed with a number of features including:
+
+  - Anonymous or Authenticated access with Twitter, Facebook or GitHub OAuth
+  - Joining any arbitrary user-defined channel
+  - Private messaging
+  - Command history
+  - Autocomplete of user names
+  - Highlighting of mentions
+  - Grouping messages by user
+  - Active list of users, kept live with:
+    - Periodic Heartbeats
+    - Automatic unregistration on page unload
+  - Remote Control
+    - Send a global announcement to all users
+    - Toggle on/off channel controls
+    - Change the CSS style of any element
+    - Change the HTML document's title
+    - Redirect users to any url
+    - Play a youtube video
+    - Display an image url
+    - Raise DOM events
+
+<img src="https://github.com/ServiceStack/Assets/blob/master/img/apps/Chat/vs-sln.png" width="257" align="right" hspace="10">
+
+Chat is another ServiceStack Single Page App Special showing how you can get a lot done with minimal effort and dependencies which delivers all these features in a tiny footprint built with vanilla jQuery and weighing just:
+
+  - [1 default.cshtml page](https://github.com/ServiceStackApps/Chat/blob/master/src/Chat/default.cshtml) with under **170 lines of JavaScript** and **70 lines** of HTML
+  - [2 ServiceStack Services](https://github.com/ServiceStackApps/Chat/blob/master/src/Chat/Global.asax.cs) entire backend in 1 `.cs` file
+  - 1 ASP.NET Web Application project requiring only a sane **9 .NET dll** references
+
+### Remote control
+
+Chat features the ability to remotely control other users chat window with the client bindings in `/js/ss-utils.js`, providing a number of different ways to interact and modify a live webapp by either:
+
+  - Invoking Global Event Handlers
+  - Modifying CSS via jQuery
+  - Sending messages to Receivers
+  - Raising jQuery Events
+
+All options above are designed to integrate with an apps existing functionality by providing the ability to invoke predefined handlers and exported object instances as well as modify jQuery CSS and raising DOM events.
+
+The [complete documentation](https://github.com/ServiceStackApps/Chat) in Chat is the recommended way to learn more about Server Events which goes through and explains how to use its Server and Client features.
+
+## [ServiceStackVS](https://github.com/ServiceStack/ServiceStackVS) - ServiceStack's VS.NET Extension
+
+Another exciting announcement is the initial release of [ServiceStackVS](https://github.com/ServiceStack/ServiceStackVS) - our VS.NET ServiceStack Extension containing the most popular starting templates for ServiceStack powered solutions:
+
+![Visual Studio Templates](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/servicestackvs/vs-templates.png)
+
+Each project template supports our [recommended multi-project structure](https://github.com/ServiceStack/ServiceStack/wiki/Physical-project-structure) promoting a clean architecture and Web Services best-practices, previously [documented in Email Contacts](https://github.com/ServiceStack/EmailContacts/#creating-emailcontacts-solution-from-scratch).
+
+This is now the fastest way to get up and running with ServiceStack. With these new templates you can now create a new ServiceStack Razor, AngularJS and Bootstrap enabled WebApp, pre-wired end-to-end in seconds:
+
+![AngularJS WalkThrough](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/servicestackvs/angularjs-overview.gif)
+
+<a href="http://www.packtpub.com/learning-angularjs-for-net-developers/book"><img src="https://raw.githubusercontent.com/ServiceStack/Assets/master/img/community/learning-angularjs.jpg" width="175" align="right" hspace="10"></a>
+
+### Get the [Learning AngularJS for .NET Developers](http://www.packtpub.com/learning-angularjs-for-net-developers/book) Book!
+
+On ServiceStack and AngularJS front, we also have great content coming from the ServiceStack community as 
+**[Learning AngularJS for .NET Developers](http://www.packtpub.com/learning-angularjs-for-net-developers/book)**, 
+a new book by [Alex Pop](https://twitter.com/AlexandruVPop) has just been made available. 
+
+More details about the book as well as downloadable code-samples is available on 
+[Alex's announcement blog post](http://alexvpop.blogspot.co.uk/2014/06/announcing-learning-angularjs-dotnet.html).
+
+### Download ServiceStackVS
+
+ServiceStackVS supports both VS.NET 2013 and 2012 and can be [downloaded from the Visual Studio Gallery](http://visualstudiogallery.msdn.microsoft.com/5bd40817-0986-444d-a77d-482e43a48da7)
+
+[![VS.NET Gallery Download](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/servicestackvs/vsgallery-download.png)](http://visualstudiogallery.msdn.microsoft.com/5bd40817-0986-444d-a77d-482e43a48da7)
+
+### VS.NET 2012 Prerequisites
+
+  - VS.NET 2012 Users must install the [Microsoft Visual Studio Shell Redistributable](http://www.microsoft.com/en-au/download/details.aspx?id=40764)
+  - It's also highly recommended to [Update to the latest NuGet](http://docs.nuget.org/docs/start-here/installing-nuget). 
+
+> Alternatively if continuing to use an older version of the **NuGet Package Manager** you will need to click on **Enable NuGet Package Restore** after creating a new project to ensure its NuGet dependencies are installed.
+
+### Feedback
+
+We hope **ServiceStackVS** helps make ServiceStack developers more productive than ever and we'll look at continue improving it with new features in future. [Suggestions and feedback are welcome](http://servicestack.uservoice.com/forums/176786-feature-requests).  
+
+## [Authentication](https://github.com/ServiceStack/ServiceStack/wiki/Authentication-and-authorization)
+
+### Saving User Profile Images
+
+To make it easier to build Social Apps like [Chat](https://github.com/ServiceStackApps/Chat) with ServiceStack we've started saving profile image urls (aka avatars) for the following popular OAuth providers:
+
+ - Twitter
+ - Facebook
+ - GitHub
+ - Google OAuth2
+ - LinkedIn OAuth2
+
+The users profile url can be accessed in your services using the `IAuthSession.GetProfileUrl()` extension method which goes through the new `IAuthMetadataProvider` which by default looks in `UserAuthDetails.Items["profileUrl"]`.
+
+### New IAuthMetadataProvider
+
+A new [IAuthMetadataProvider](https://github.com/ServiceStack/ServiceStack/blob/master/src/ServiceStack/Auth/AuthMetadataProvider.cs) has been added that provides a way to customize the `authInfo` in all AuthProviders. It also allows overriding of how extended Auth metadata like `profileUrl` is returned.
+
+```csharp
+public interface IAuthMetadataProvider
+{
+    void AddMetadata(IAuthTokens tokens, Dictionary<string, string> authInfo);
+
+    string GetProfileUrl(IAuthSession authSession, string defaultUrl = null);
+}
+```
+
+> To override with a custom implementation, register `IAuthMetadataProvider` in the IOC
+
+### Saving OAuth Metadata
+
+
+The new `SaveExtendedUserInfo` property (enabled by default) on all OAuth providers let you control whether to save the extended OAuth metadata available (into `UserAuthDetails.Items`) when logging in via OAuth.
+
+## [OrmLite](https://github.com/ServiceStack/ServiceStack.OrmLite/)
+
+### Loading of References in Multi-Select Queries
+
+Previous support of pre-loading of references were limited to a single entity using `LoadSingleById` to automatically fetch all child references, e.g:
+
+```csharp
+public class Customer
+{
+    [AutoIncrement]
+    public int Id { get; set; }
+    public string Name { get; set; }
+
+    [Reference] // Save in CustomerAddress table
+    public CustomerAddress PrimaryAddress { get; set; }
+
+    [Reference] // Save in Order table
+    public List<Order> Orders { get; set; }
+}
+
+var customer = db.LoadSingleById<Customer>(request.Id);
+customer.PrimaryAddress   // Loads 1:1 CustomerAddress record 
+customer.Orders           // Loads 1:M Order records 
+```
+
+We've now also added support for pre-loading of references for multiple resultsets as well with `LoadSelect` which loads references for all results, e.g:
+
+```csharp
+var customers = db.LoadSelect<Customer>(q => q.Name.StartsWith("A"));
+```
+
+This is implemented efficiently behind the scenes where only 1 additional SQL Query is performed for each defined reference.
+
+> As a design goal none of OrmLite Query API's perform N+1 queries.
+
+### Self References
+
+We've extended OrmLite [References support](https://github.com/ServiceStack/ServiceStack.OrmLite/#reference-support-poco-style) to support Self References for **1:1** relations where the foreign key property can be on the parent table, e.g: 
+
+```csharp
+public class Customer
+{
+    ...
+    public int CustomerAddressId { get; set; }
+
+    [Reference]
+    public CustomerAddress PrimaryAddress { get; set; }
+}
+```
+
+Which maintains the same relationship as having the Foreign Key column on the child table instead, i,e:
+
+```csharp
+public class CustomerAddress
+{
+    public int CustomerId { get; set; }
+}
+```
+
+### Support Foreign Key Attributes to specify Reference Fields
+
+Previously definitions of references relied on [Reference Conventions](https://github.com/ServiceStack/ServiceStack.OrmLite/#reference-conventions) using either the C# Property Name or Property Aliases. You can now also use the [References and ForeignKey attributes](https://github.com/ServiceStack/ServiceStack.OrmLite/#new-foreign-key-attribute-for-referential-actions-on-updatedeletes) to specify Reference Properties, e.g:
+
+```csharp
+public class Customer
+{
+    [Reference(typeof(CustomerAddress))]
+    public int PrimaryAddressId { get; set; }
+
+    [Reference]
+    public CustomerAddress PrimaryAddress { get; set; }
+}
+```
+
+> Reference Attributes take precedence over naming conventions
+
+### Support for Stored Procedures with out params
+
+A new `SqlProc` API was added returning an `IDbCommand` which can be used to customize the Stored Procedure call letting you add custom out parameters. The example below shows 
+
+```csharp
+string spSql = @"DROP PROCEDURE IF EXISTS spSearchLetters;
+    CREATE PROCEDURE spSearchLetters (IN pLetter varchar(10), OUT pTotal int)
+    BEGIN
+        SELECT COUNT(*) FROM LetterFrequency WHERE Letter = pLetter INTO pTotal;
+        SELECT * FROM LetterFrequency WHERE Letter = pLetter;
+    END";
+
+db.ExecuteSql(spSql);
+
+var cmd = db.SqlProc("spSearchLetters", new { pLetter = "C" });
+var pTotal = cmd.AddParam("pTotal", direction: ParameterDirection.Output);
+
+var results = cmd.ConvertToList<LetterFrequency>();
+var total = pTotal.Value;
+```
+
+An alternative approach is to use the new overload added to the raw SQL API `SqlList` that lets you customize the Stored Procedure using a filter, e.g:
+
+```csharp
+IDbDataParameter pTotal = null;
+var results = db.SqlList<LetterFrequency>("spSearchLetters", cmd => {
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.AddParam("pLetter", "C");
+        pTotal = cmd.AddParam("pTotal", direction: ParameterDirection.Output);
+    });
+var total = pTotal.Value;
+```
+
+### Minor OrmLite Features
+
+ - Use `OrmLiteConfig.DisableColumnGuessFallback=false` to disable fallback matching heuristics
+ - Added [GenericTableExpressions](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/Expression/GenericTableExpressions.cs) example showing how to extend OrmLite to support different runtime table names on a single schema type.
+
+## [AutoQuery](https://github.com/ServiceStack/ServiceStack/wiki/Auto-Query)
+
+### Support for loading References
+
+AutoQuery now takes advantage of OrmLite's new support for loading child references where marking your Query DTO with `[Reference]` will automatically load its related data, e.g:
+
+```csharp
+public class Rockstar
+{
+    public int Id { get; set; }
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
+    public int? Age { get; set; }
+
+    [Reference]
+    public List<RockstarAlbum> Albums { get; set; } 
+}
+```
+
+### Improved OrderBy
+
+Add support for inverting sort direction of individual orderBy fields using '-' prefix e.g: 
+
+```csharp
+// ?orderBy=Rating,-ImdbId
+var movies = client.Get(new SearchMovies { OrderBy = "Rating,-ImdbId" });
+
+// ?orderByDesc=-Rating,ImdbId
+var movies = client.Get(new SearchMovies { OrderByDesc = "-Rating,ImdbId" });
+```
+
+## ServiceStack.Text
+
+ - Added support for `OrderedDictionary` and other uncommon `IDictionary` types
+ - WCF-style `JsConfig.OnSerializedFn` custom hook has been added
+ - `JsConfig.ReuseStringBuffer` is enabled by default for faster JSON/JSV text serialization
+ - Properties can also be ignored with `[JsonIgnore]` attribute
+
+## Other Features
+
+  - New `[Exclude(Feature.Soap)]` attribute can be used to exclude types from XSD/WSDL's
+  - XSD/WSDL's no longer including open generic types
+  - Added `$.ss.getSelection()`, `$.ss.queryString()`, `$.ss.splitOnFirst()`, `$.ss.splitOnLast()` to /ss-utils.js
+  - `TwitterAuthProvider` now makes authenticated v1.1 API requests to fetch user metadata
+
+
+# v4.0.23 Release Notes
 
 ## [AutoQuery](https://github.com/ServiceStack/ServiceStack/wiki/Auto-Query)
 
@@ -25,7 +504,7 @@ AutoQuery also benefits from just being normal ServiceStack Services where you c
  - AutoQuery services can be mapped to any [user-defined route](https://github.com/ServiceStack/ServiceStack/wiki/Routing)
  - Is available in all [registered formats](https://github.com/ServiceStack/ServiceStack/wiki/Formats)
    - The [CSV Format](https://github.com/ServiceStack/ServiceStack/wiki/ServiceStack-CSV-Format) especially shines in AutoQuery who's tabular result-set are perfect for CSV
- - Can be [consumed from typed Service Clients](https://github.com/ServiceStack/ServiceStack/wiki/Clients-overview) allowing an end-to-end API without code-gen in [PCL client platforms as well](https://github.com/ServiceStack/Hello)
+ - Can be [consumed from typed Service Clients](https://github.com/ServiceStack/ServiceStack/wiki/Clients-overview) allowing an end-to-end API without code-gen in [PCL client platforms as well](https://github.com/ServiceStackApps/HelloMobile)
 
 ### Getting Started
 
@@ -610,7 +1089,7 @@ Detailed command logging is now enabled in OrmLite and Redis when `debugEnabled=
 
  - Change Silverlight to auto emulate HTTP Verbs for non GET or POST requests
  - Shorter aliases added on `PostFileWithRequest` which uses the Request DTO's auto-generated url
- - The [PCL version of ServiceStack.Interfaces](https://github.com/ServiceStack/Hello) now supports a min version of .NET 4.0
+ - The [PCL version of ServiceStack.Interfaces](https://github.com/ServiceStackApps/HelloMobile) now supports a min version of .NET 4.0
 
 ## OrmLite
 
@@ -1701,7 +2180,8 @@ all services to be immediately available, naturally, via an end-to-end typed API
 During this release all Example projects, Demos, Starter Templates, etc in the 
 [ServiceStack.Example](https://github.com/ServiceStack/ServiceStack.Examples) and 
 [ServiceStack.UseCases](https://github.com/ServiceStack/ServiceStack.UseCases/) 
-master repositories were upgraded to ServiceStack v4. A new [ServiceStack + MVC5 project](https://github.com/ServiceStack/ServiceStack.UseCases/tree/master/Mvc5) was also added to UseCases, it just follows the instructions at [[MVC Integration]] wiki, but starts with an empty MVC5 project.
+master repositories were upgraded to ServiceStack v4. A new [ServiceStack + MVC5 project](https://github.com/ServiceStack/ServiceStack.UseCases/tree/master/Mvc5) 
+was also added to UseCases, it just follows the instructions at [MVC Integration](https://github.com/ServiceStack/ServiceStack/wiki/Mvc-integration) wiki, but starts with an empty MVC5 project.
 
 ### Added new OrmLiteCacheClient
 
@@ -2182,7 +2662,7 @@ New in this release:
 
 The biggest feature of this release is the release of the new Portable Client NuGet packages:
 
-[![Portable Class Library Support](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/hello-pcl.png)](https://github.com/ServiceStack/Hello)
+[![Portable Class Library Support](https://raw.githubusercontent.com/ServiceStack/Assets/master/img/release-notes/hello-pcl.png)](https://github.com/ServiceStackApps/HelloMobile)
 
   - ServiceStack.Interfaces.Pcl
     - PCL Profiles: iOS, Android, Windows8, .NET 4.5, Silverlight5, WP8
@@ -2193,7 +2673,7 @@ The biggest feature of this release is the release of the new Portable Client Nu
     - PCL Profiles: iOS, Android, Windows8, .NET 4.5
     - Custom builds: Silverlight 5
 
-This now allows sharing binaries between the above platforms. To illustrate this a new [Hello Repository](https://github.com/ServiceStack/Hello) was created to show how to use the same portable class libraries and DTO's across the different client platforms above.
+This now allows sharing binaries between the above platforms. To illustrate this a new [Hello Repository](https://github.com/ServiceStackApps/HelloMobile) was created to show how to use the same portable class libraries and DTO's across the different client platforms above.
 
 #### Breaking Changes
 
@@ -2269,7 +2749,7 @@ The number of deletions is indicative of how much legacy code was able to be rem
   - ServiceManager has been merged into `ServiceController`. 
   - The **ServiceStack.Logging** and **ServiceStack.Contrib** v4 projects have been merged into the major ServiceStack repo.
   - The dynamic session `base.Session` has been renamed to `base.SessionBag` to better reflect its semantics.
-  - The [[Auto Mapping]] Utils extension methods were renamed from `TFrom.TranslateTo<T>()` to `TFrom.ConvertTo<T>()`.
+  - The [Auto Mapping](https://github.com/ServiceStack/ServiceStack/wiki/Auto-mapping) Utils extension methods were renamed from `TFrom.TranslateTo<T>()` to `TFrom.ConvertTo<T>()`.
   - The `RequestFilters` and `ResponseFilters` were renamed to `GlobalRequestFilters` and `GlobalResponseFilters` which matches naming in the client `ServiceClientBase.GlobalRequestFilter`.
   - New `GlobalMessageRequestFilters` and `GlobalMessageResponseFilters` have been added which are instead used by non-HTTP endpoints use, e.g. MQ. 
   - `CustomHttpHandlers` has been renamed to `CustomErrorHttpHandlers`

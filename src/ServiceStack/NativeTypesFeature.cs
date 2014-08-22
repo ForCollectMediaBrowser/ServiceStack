@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
+using ServiceStack.DataAnnotations;
 using ServiceStack.NativeTypes;
 
 namespace ServiceStack
@@ -28,32 +30,39 @@ namespace ServiceStack
                     { "Double", "double" },    
                     { "Decimal", "decimal" },    
                 },
-                SkipExistingTypes = new HashSet<Type>
+                ExportAttributes = new HashSet<Type>
                 {
-                    typeof(ResponseStatus),
-                    typeof(ErrorResponse),
-                    typeof(Authenticate),
-                    typeof(AuthenticateResponse),
-                    typeof(Register),
-                    typeof(RegisterResponse),
-                    typeof(QueryResponse<>),
+                    typeof(ApiAttribute),
+                    typeof(ApiResponseAttribute),
+                    typeof(ApiMemberAttribute),
+                    typeof(StringLengthAttribute),
+                    typeof(DefaultAttribute),
+                    typeof(IgnoreAttribute),
+                    typeof(IgnoreDataMemberAttribute),
+                    typeof(MetaAttribute),
+                    typeof(RequiredAttribute),
+                    typeof(ReferencesAttribute),
+                    typeof(StringLengthAttribute),
                 },
                 IgnoreTypes = new HashSet<Type>
                 {
-                    typeof(TypesCSharp),
-                    typeof(TypesMetadata),
-                    typeof(NativeTypesBase),
-                    typeof(MetadataTypesConfig),
+                },
+                IgnoreTypesInNamespaces = new List<string>
+                {
+                    "ServiceStack",    
+                    "ServiceStack.Auth",
+                    "ServiceStack.Admin",
+                    "ServiceStack.NativeTypes",    
+                    "ServiceStack.Api.Swagger",    
                 },
                 DefaultNamespaces = new List<string> 
                 {
                     "System",
                     "System.Collections",
-                    "System.ComponentModel",
                     "System.Collections.Generic",
                     "System.Runtime.Serialization",
-                    "ServiceStack.ServiceHost",
-                    "ServiceStack.ServiceInterface.ServiceModel",
+                    "ServiceStack",
+                    "ServiceStack.DataAnnotations",
                 }
             };
         }

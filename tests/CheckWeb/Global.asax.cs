@@ -4,10 +4,13 @@ using System.Collections.Specialized;
 using System.Net;
 using System.Web;
 using Check.ServiceInterface;
+using Check.ServiceModel;
 using Funq;
 using ServiceStack;
 using ServiceStack.Api.Swagger;
+using ServiceStack.Data;
 using ServiceStack.MiniProfiler;
+using ServiceStack.OrmLite;
 using ServiceStack.Razor;
 using ServiceStack.Text;
 using ServiceStack.Validation;
@@ -43,7 +46,7 @@ namespace CheckWeb
                 DebugMode = true,
 #endif
                 // Disable SOAP endpoints
-                EnableFeatures = Feature.All.Remove(Feature.Soap)
+                //EnableFeatures = Feature.All.Remove(Feature.Soap)
             });
 
             container.Register<IServiceClient>(c =>
@@ -65,7 +68,31 @@ namespace CheckWeb
 
             // Configure ServiceStack Razor views.
             this.ConfigureView(container);
+
+            Plugins.Add(new AutoQueryFeature());
+            Plugins.Add(new PostmanFeature());
+
+
+            container.Register<IDbConnectionFactory>(
+                new OrmLiteConnectionFactory(":memory:", SqliteDialect.Provider));
+
+            using (var db = container.Resolve<IDbConnectionFactory>().Open())
+            {
+                db.DropAndCreateTable<Rockstar>();
+                db.InsertAll(SeedRockstars);
+            }
         }
+
+        public static Rockstar[] SeedRockstars = new[] {
+            new Rockstar { Id = 1, FirstName = "Jimi", LastName = "Hendrix", Age = 27 },
+            new Rockstar { Id = 2, FirstName = "Jim", LastName = "Morrison", Age = 27 },
+            new Rockstar { Id = 3, FirstName = "Kurt", LastName = "Cobain", Age = 27 },
+            new Rockstar { Id = 4, FirstName = "Elvis", LastName = "Presley", Age = 42 },
+            new Rockstar { Id = 5, FirstName = "David", LastName = "Grohl", Age = 44 },
+            new Rockstar { Id = 6, FirstName = "Eddie", LastName = "Vedder", Age = 48 },
+            new Rockstar { Id = 7, FirstName = "Michael", LastName = "Jackson", Age = 50 },
+        };
+
 
         /// <summary>
         /// Configure JSON serialization properties.
@@ -89,8 +116,6 @@ namespace CheckWeb
         /// <param name="container">The container.</param>
         private void ConfigureDataConnection(Container container)
         {
-            container.RegisterAutoWiredAs<Echo, IEcho>();
-
             // ...
         }
 
@@ -125,7 +150,11 @@ namespace CheckWeb
             Plugins.Add(new RazorFormat());
 
             // Enable support for Swagger API browser
-            Plugins.Add(new SwaggerFeature());
+            Plugins.Add(new SwaggerFeature
+            {
+                UseBootstrapTheme = true, 
+                LogoUrl = "//lh6.googleusercontent.com/-lh7Gk4ZoVAM/AAAAAAAAAAI/AAAAAAAAAAA/_0CgCb4s1e0/s32-c/photo.jpg"
+            });
             //Plugins.Add(new CorsFeature()); // Uncomment if the services to be available from external sites
         }
     }

@@ -16,7 +16,7 @@
     <iconUrl>https://servicestack.net/img/logo-32.png</iconUrl>
     <tags>ServiceStack Common Framework Clients ServiceClients Gateway</tags>
     <language>en-US</language>
-    <copyright>Copyright 2013 Service Stack</copyright>
+    <copyright>Copyright 2014 Service Stack</copyright>
     <dependencies>
       <dependency id="ServiceStack.Interfaces" version="4.0" />
       <dependency id="ServiceStack.Text" version="4.0" />
@@ -25,5 +25,9 @@
   <files>
     <file src="lib\**\*.*" target="lib" />
     <file src="..\..\src\ServiceStack.Client\**\*.cs" target="src" />
+    <file src="..\..\src\ServiceStack.Pcl.Android\Pcl.Dynamic.cs" target="src" />
+    <file src="..\..\src\ServiceStack.Pcl.Android\PclExport.Net40.cs" target="src" />
+    <file src="..\..\src\ServiceStack.Pcl.Android\Resources\*.cs" target="src" />
+    <file src="..\..\src\ServiceStack.Pcl.WinStore\PclExport.WinStore.cs" target="src" />
   </files>
 </package>

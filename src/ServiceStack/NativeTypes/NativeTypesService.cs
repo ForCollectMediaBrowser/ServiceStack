@@ -1,12 +1,15 @@
 ﻿using System.Collections.Generic;
+using ServiceStack.DataAnnotations;
 using ServiceStack.NativeTypes.CSharp;
 using ServiceStack.Web;
 
 namespace ServiceStack.NativeTypes
 {
+    [Exclude(Feature.Soap)]
     [Route("/types/metadata")]
     public class TypesMetadata : NativeTypesBase { }
 
+    [Exclude(Feature.Soap)]
     [Route("/types/csharp")]
     public class TypesCSharp : NativeTypesBase { }
 
@@ -34,12 +37,17 @@ namespace ServiceStack.NativeTypes
         MetadataTypes GetMetadataTypes(IRequest req, MetadataTypesConfig config = null);
     }
 
+
+    [Restrict(VisibilityTo = RequestAttributes.None)]
     public class NativeTypesService : Service
     {
         public INativeTypesMetadata NativeTypesMetadata { get; set; }
 
         public MetadataTypes Any(TypesMetadata request)
         {
+            if (request.BaseUrl == null)
+                request.BaseUrl = Request.GetBaseUrl();
+
             var typesConfig = NativeTypesMetadata.GetConfig(request);
             var metadataTypes = NativeTypesMetadata.GetMetadataTypes(Request, typesConfig);
             return metadataTypes;
@@ -48,6 +56,9 @@ namespace ServiceStack.NativeTypes
         [AddHeader(ContentType = MimeTypes.PlainText)]
         public object Any(TypesCSharp request)
         {
+            if (request.BaseUrl == null)
+                request.BaseUrl = Request.GetBaseUrl();
+
             var typesConfig = NativeTypesMetadata.GetConfig(request);
             var metadataTypes = NativeTypesMetadata.GetMetadataTypes(Request, typesConfig);
             var csharp = new CSharpGenerator(typesConfig).GetCode(metadataTypes);

@@ -41,16 +41,16 @@ namespace ServiceStack.NativeTypes.CSharp
             sb.AppendLine("ServerVersion: {0}".Fmt(metadata.Version));
             sb.AppendLine("MakePartial: {0}".Fmt(Config.MakePartial));
             sb.AppendLine("MakeVirtual: {0}".Fmt(Config.MakeVirtual));
+            sb.AppendLine("MakeDataContractsExtensible: {0}".Fmt(Config.MakeDataContractsExtensible));
             sb.AppendLine("AddReturnMarker: {0}".Fmt(Config.AddReturnMarker));
             sb.AppendLine("AddDescriptionAsComments: {0}".Fmt(Config.AddDescriptionAsComments));
             sb.AppendLine("AddDataContractAttributes: {0}".Fmt(Config.AddDataContractAttributes));
-            sb.AppendLine("AddDefaultXmlNamespace: {0}".Fmt(Config.AddDefaultXmlNamespace));
-            sb.AppendLine("MakeDataContractsExtensible: {0}".Fmt(Config.MakeDataContractsExtensible));
             sb.AppendLine("AddIndexesToDataMembers: {0}".Fmt(Config.AddIndexesToDataMembers));
-            sb.AppendLine("InitializeCollections: {0}".Fmt(Config.InitializeCollections));
             sb.AppendLine("AddResponseStatus: {0}".Fmt(Config.AddResponseStatus));
             sb.AppendLine("AddImplicitVersion: {0}".Fmt(Config.AddImplicitVersion));
-            sb.AppendLine("DefaultNamespaces: {0}".Fmt(Config.DefaultNamespaces.ToArray().Join(", ")));
+            sb.AppendLine("InitializeCollections: {0}".Fmt(Config.InitializeCollections));
+            sb.AppendLine("AddDefaultXmlNamespace: {0}".Fmt(Config.AddDefaultXmlNamespace));
+            //sb.AppendLine("DefaultNamespaces: {0}".Fmt(Config.DefaultNamespaces.ToArray().Join(", ")));
             sb.AppendLine("*/");
             sb.AppendLine();
 
@@ -71,59 +71,85 @@ namespace ServiceStack.NativeTypes.CSharp
 
             string lastNS = null;
 
-            sb.AppendLine("#region Operations");
-            sb.AppendLine();
-            foreach (var operation in metadata.Operations
-                .OrderBy(x => x.Request.Namespace)
-                .OrderBy(x => x.Request.Name))
-            {
-                var request = operation.Request;
-                var response = operation.Response;
-                lastNS = AppendType(ref sb, request, lastNS,
-                    new CreateTypeOptions {
-                        ImplementsFn = () => {
-                            if (!Config.AddReturnMarker
-                                && !request.ReturnVoidMarker
-                                && request.ReturnMarkerGenericArgs == null)
-                                return null;
+            var existingOps = new HashSet<string>();
 
-                            if (request.ReturnVoidMarker)
-                                return "IReturnVoid";
-                            if (request.ReturnMarkerGenericArgs != null)
-                                return Type("IReturn`1", request.ReturnMarkerGenericArgs);
-                            return response != null
-                                ? Type("IReturn`1", new[] { response.Name })
-                                : null;
-                        },
-                        IsRequest = true,
-                    });
-                lastNS = AppendType(ref sb, operation.Response, lastNS,
-                    new CreateTypeOptions {
-                        IsResponse = true,
-                    });
-            }
-            if (lastNS != null)
-                sb.AppendLine("}");
-            sb.AppendLine();
-            sb.AppendLine("#endregion");
+            var requestTypes = metadata.Operations.Select(x => x.Request).ToHashSet();
+            var requestTypesMap = metadata.Operations.ToSafeDictionary(x => x.Request);
+            var responseTypes = metadata.Operations
+                .Where(x => x.Response != null)
+                .Select(x => x.Response).ToHashSet();
+            var types = metadata.Types.ToHashSet();
 
-            sb.AppendLine();
-            sb.AppendLine();
-
-            lastNS = null;
-            sb.AppendLine("#region Types");
-            sb.AppendLine();
-            foreach (var type in metadata.Types
+            var allTypes = new List<MetadataType>();
+            allTypes.AddRange(requestTypes);
+            allTypes.AddRange(responseTypes);
+            allTypes.AddRange(types);
+            var orderedTypes = allTypes
                 .OrderBy(x => x.Namespace)
-                .ThenBy(x => x.Name))
+                .ThenBy(x => x.Name);
+
+            foreach (var type in orderedTypes)
             {
-                lastNS = AppendType(ref sb, type, lastNS, 
-                    new CreateTypeOptions { IsType = true });
+                var fullTypeName = type.GetFullName();
+                if (requestTypes.Contains(type))
+                {
+                    if (!existingOps.Contains(fullTypeName))
+                    {
+                        MetadataType response = null;
+                        MetadataOperationType operation;
+                        if (requestTypesMap.TryGetValue(type, out operation))
+                        {
+                            response = operation.Response;
+                        }
+
+                        lastNS = AppendType(ref sb, type, lastNS,
+                            new CreateTypeOptions
+                            {
+                                ImplementsFn = () =>
+                                {
+                                    if (!Config.AddReturnMarker
+                                        && !type.ReturnVoidMarker
+                                        && type.ReturnMarkerTypeName == null)
+                                        return null;
+
+                                    if (type.ReturnVoidMarker)
+                                        return "IReturnVoid";
+                                    if (type.ReturnMarkerTypeName != null)
+                                        return Type("IReturn`1", new[] { Type(type.ReturnMarkerTypeName) });
+                                    return response != null
+                                        ? Type("IReturn`1", new[] { Type(type.Name, type.GenericArgs) })
+                                        : null;
+                                },
+                                IsRequest = true,
+                            });
+
+                        existingOps.Add(fullTypeName);
+                    }
+                }
+                else if (responseTypes.Contains(type))
+                {
+                    if (!existingOps.Contains(fullTypeName)
+                        && !Config.IgnoreTypesInNamespaces.Contains(type.Namespace))
+                    {
+                        lastNS = AppendType(ref sb, type, lastNS,
+                            new CreateTypeOptions
+                            {
+                                IsResponse = true,
+                            });
+
+                        existingOps.Add(fullTypeName);
+                    }
+                }
+                else if (types.Contains(type) && !existingOps.Contains(fullTypeName))
+                {
+                    lastNS = AppendType(ref sb, type, lastNS,
+                        new CreateTypeOptions { IsType = true });
+                }
             }
+
             if (lastNS != null)
                 sb.AppendLine("}");
             sb.AppendLine();
-            sb.AppendLine("#endregion");
 
             return sb.ToString();
         }
@@ -150,15 +176,20 @@ namespace ServiceStack.NativeTypes.CSharp
 
             sb.AppendLine();
             AppendComments(sb, type.Description);
+            if (type.Routes != null)
+            {
+                AppendAttributes(sb, type.Routes.ConvertAll(x => x.ToMetadataAttribute()));
+            }
+            AppendAttributes(sb, type.Attributes);
             AppendDataContract(sb, type.DataContract);
 
             var partial = Config.MakePartial ? "partial " : "";
-            sb.AppendLine("public {0}class {1}".Fmt(partial, type.Name.SafeToken()));
+            sb.AppendLine("public {0}class {1}".Fmt(partial, Type(type.Name, type.GenericArgs)));
 
             //: BaseClass, Interfaces
             var inheritsList = new List<string>();
             if (type.Inherits != null)
-                inheritsList.Add(Type(type.Inherits, type.InheritsGenericArgs));
+                inheritsList.Add(Type(type.Inherits));
             if (options.ImplementsFn != null)
             {
                 var implStr = options.ImplementsFn();
@@ -187,7 +218,7 @@ namespace ServiceStack.NativeTypes.CSharp
 
         private void AddConstuctor(StringBuilderWrapper sb, MetadataType type, CreateTypeOptions options)
         {
-            if (Config.AddImplicitVersion == null && !Config.InitializeCollections) 
+            if (Config.AddImplicitVersion == null && !Config.InitializeCollections)
                 return;
 
             var collectionProps = new List<MetadataPropertyType>();
@@ -204,7 +235,7 @@ namespace ServiceStack.NativeTypes.CSharp
                 sb.AppendLine();
             }
 
-            sb.AppendLine("public {0}()".Fmt(type.Name.SafeToken()));
+            sb.AppendLine("public {0}()".Fmt(NameOnly(type.Name)));
             sb.AppendLine("{");
             sb = sb.Indent();
 
@@ -303,7 +334,7 @@ namespace ServiceStack.NativeTypes.CSharp
                             args.Append("{0}".Fmt(TypeValue(ctorArg.Type, ctorArg.Value)));
                         }
                     }
-                    if (attr.Args != null)
+                    else if (attr.Args != null)
                     {
                         foreach (var attrArg in attr.Args)
                         {
@@ -327,6 +358,11 @@ namespace ServiceStack.NativeTypes.CSharp
             if (alias == "string")
                 return value.QuotedSafeValue();
             return value;
+        }
+
+        public string Type(MetadataTypeName typeName)
+        {
+            return Type(typeName.Name, typeName.GenericArgs);
         }
 
         public string Type(string type, string[] genericArgs)
@@ -366,6 +402,11 @@ namespace ServiceStack.NativeTypes.CSharp
             Config.TypeAlias.TryGetValue(type, out typeAlias);
 
             return typeAlias ?? type.SafeToken();
+        }
+
+        public string NameOnly(string type)
+        {
+            return type.SplitOnFirst('`')[0].SafeToken();
         }
 
         public void AppendComments(StringBuilderWrapper sb, string desc)
@@ -494,6 +535,26 @@ namespace ServiceStack.NativeTypes.CSharp
         public static string QuotedSafeValue(this string value)
         {
             return "\"{0}\"".Fmt(value.SafeValue());
+        }
+
+        public static MetadataAttribute ToMetadataAttribute(this MetadataRoute route)
+        {
+            var attr = new MetadataAttribute
+            {
+                Name = "Route",
+                ConstructorArgs = new List<MetadataPropertyType>
+                {
+                    new MetadataPropertyType { Type = "string", Value = route.Path },
+                },
+            };
+
+            if (route.Verbs != null)
+            {
+                attr.ConstructorArgs.Add(
+                    new MetadataPropertyType { Type = "string", Value = route.Verbs });
+            }
+
+            return attr;
         }
     }
 }

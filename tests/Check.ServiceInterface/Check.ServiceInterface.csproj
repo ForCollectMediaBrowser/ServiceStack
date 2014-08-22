@@ -44,6 +44,7 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Net" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Web" />
     <Reference Include="System.Xml.Linq" />
@@ -53,18 +54,27 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AnonTypeService.cs" />
+    <Compile Include="AutoQueryServices.cs" />
     <Compile Include="ChangeRequestService.cs" />
-    <Compile Include="CodeGenTestTypes.cs" />
-    <Compile Include="CustomMethodRoutes.cs" />
+    <Compile Include="NativeTypesTestService.cs" />
     <Compile Include="EchoesService.cs" />
     <Compile Include="ErrorsService.cs" />
     <Compile Include="MetadataDtoIssue.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ServiceStack.Server\ServiceStack.Server.csproj">
+      <Project>{5a315f92-80d2-4c60-a5a4-22e027ac7e7e}</Project>
+      <Name>ServiceStack.Server</Name>
+    </ProjectReference>
     <ProjectReference Include="..\..\src\ServiceStack\ServiceStack.csproj">
       <Project>{680A1709-25EB-4D52-A87F-EE03FFD94BAA}</Project>
       <Name>ServiceStack</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Check.ServiceModel\Check.ServiceModel.csproj">
+      <Project>{213EF4BA-786A-432F-B147-5702B18DE3CC}</Project>
+      <Name>Check.ServiceModel</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

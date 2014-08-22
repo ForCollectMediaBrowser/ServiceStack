@@ -9,7 +9,7 @@
     <summary>Opensource .NET and Mono REST Web Services framework</summary>
     <description>
       Binaries for the ServiceStack web framework.
-      Visit http://mono.servicestack.net/ServiceStack.Hello/
+      Visit https://github.com/ServiceStack/ServiceStack/wiki/Creating-your-first-project
       and https://github.com/ServiceStack/ServiceStack/wiki/Create-your-first-webservice
       for walk throughs and docs on creating your first web service.
     </description>
@@ -19,7 +19,7 @@
     <iconUrl>https://servicestack.net/img/logo-32.png</iconUrl>
     <tags>Fast JSON XML CSV HTML SOAP JSV REST Web Service Framework MONO ServiceStack</tags>
     <language>en-US</language>
-    <copyright>Copyright 2013 Service Stack</copyright>
+    <copyright>Copyright 2014 Service Stack</copyright>
     <dependencies>
       <dependency id="ServiceStack.Common" version="4.0" />
       <dependency id="ServiceStack.Client" version="4.0" />

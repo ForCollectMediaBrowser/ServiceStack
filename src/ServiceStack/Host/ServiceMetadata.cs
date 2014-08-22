@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using ServiceStack.DataAnnotations;
 using ServiceStack.Text;
 using ServiceStack.Web;
 
@@ -79,6 +80,24 @@ namespace ServiceStack.Host
 
                 operation.Routes.Add(restPath);
             }
+        }
+
+        readonly HashSet<Assembly> excludeAssemblies = new HashSet<Assembly>
+        {
+            typeof(string).Assembly,            //mscorelib
+            typeof(Uri).Assembly,               //System
+            typeof(ServiceStackHost).Assembly,  //ServiceStack
+            typeof(UrnId).Assembly,             //ServiceStack.Common
+            typeof(ErrorResponse).Assembly,     //ServiceStack.Interfaces
+        };
+
+        public List<Assembly> GetOperationAssemblies()
+        {
+            var assemblies = Operations
+                .SelectMany(x => x.GetAssemblies())
+                .Where(x => !excludeAssemblies.Contains(x));
+
+            return assemblies.ToList();
         }
 
         public List<OperationDto> GetOperationDtos()
@@ -169,8 +188,17 @@ namespace ServiceStack.Host
 
             //Less fine-grained on /metadata pages. Only check Network and Format
             var reqAttrs = httpReq.GetAttributes();
-            var showToNetwork = CanShowToNetwork(operation, reqAttrs);
+            var showToNetwork = CanShowToNetwork(operation.RestrictTo, reqAttrs);
             return showToNetwork;
+        }
+
+        public bool IsVisible(IRequest httpReq, Type requestType)
+        {
+            if (HostContext.Config != null && !HostContext.Config.EnableAccessRestrictions)
+                return true;
+
+            var operation = HostContext.Metadata.GetOperation(requestType);
+            return operation == null || IsVisible(httpReq, operation);
         }
 
         public bool IsVisible(IRequest httpReq, Format format, string operationName)
@@ -250,13 +278,13 @@ namespace ServiceStack.Host
             return true;
         }
 
-        private static bool CanShowToNetwork(Operation operation, RequestAttributes reqAttrs)
+        private static bool CanShowToNetwork(RestrictAttribute restrictTo, RequestAttributes reqAttrs)
         {
             if (reqAttrs.IsLocalhost())
-                return operation.RestrictTo.CanShowTo(RequestAttributes.Localhost)
-                       || operation.RestrictTo.CanShowTo(RequestAttributes.LocalSubnet);
+                return restrictTo.CanShowTo(RequestAttributes.Localhost)
+                       || restrictTo.CanShowTo(RequestAttributes.LocalSubnet);
 
-            return operation.RestrictTo.CanShowTo(
+            return restrictTo.CanShowTo(
                 reqAttrs.IsLocalSubnet()
                     ? RequestAttributes.LocalSubnet
                     : RequestAttributes.External);
@@ -314,20 +342,26 @@ namespace ServiceStack.Host
 
         public List<string> GetReplyOperationNames(Format format)
         {
+            var feature = format.ToFeature();
             return Metadata.OperationsMap.Values
                 .Where(x => HostContext.Config != null
                     && HostContext.MetadataPagesConfig.CanAccess(format, x.Name))
                 .Where(x => !x.IsOneWay)
+                .Where(x => !x.RequestType.AllAttributes<ExcludeAttribute>()
+                    .Any(attr => attr.Feature.HasFlag(feature)))
                 .Select(x => x.RequestType.GetOperationName())
                 .ToList();
         }
 
         public List<string> GetOneWayOperationNames(Format format)
         {
+            var feature = format.ToFeature();
             return Metadata.OperationsMap.Values
                 .Where(x => HostContext.Config != null
                     && HostContext.MetadataPagesConfig.CanAccess(format, x.Name))
                 .Where(x => x.IsOneWay)
+                .Where(x => !x.RequestType.AllAttributes<ExcludeAttribute>()
+                    .Any(attr => attr.Feature.HasFlag(feature)))
                 .Select(x => x.RequestType.GetOperationName())
                 .ToList();
         }
@@ -389,6 +423,17 @@ namespace ServiceStack.Host
             }
 
             return attrs;
+        }
+
+        public static List<Assembly> GetAssemblies(this Operation operation)
+        {
+            var ret = new List<Assembly> { operation.RequestType.Assembly };
+            if (operation.ResponseType != null
+                && operation.ResponseType.Assembly != operation.RequestType.Assembly)
+            {
+                ret.Add(operation.ResponseType.Assembly);
+            }
+            return ret;
         }
     }
 

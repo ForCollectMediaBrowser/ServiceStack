@@ -40,13 +40,13 @@ namespace ServiceStack.Host
 
         public virtual void BeforeEachRequest(IRequest requestContext, TRequest request)
         {
-            OnBeforeExecute(requestContext, request);
-
             var requestLogger = AppHost.TryResolve<IRequestLogger>();
             if (requestLogger != null)
             {
                 requestContext.SetItem("_requestDurationStopwatch", Stopwatch.StartNew());
             }
+            
+            OnBeforeExecute(requestContext, request);
         }
 
         public virtual object AfterEachRequest(IRequest requestContext, TRequest request, object response)
@@ -97,7 +97,62 @@ namespace ServiceStack.Host
                 }
 
                 var response = AfterEachRequest(request, requestDto, ServiceAction(instance, requestDto));
+                var error = response as IHttpError;
+                if (error != null)
+                {
+                    var ex = (Exception) error;
+                    var result = HandleException(request, requestDto, ex);
 
+                    if (result == null)
+                        throw ex;
+
+                    return result;
+                }
+
+                var taskResponse = response as Task;
+                if (taskResponse != null)
+                {
+                    if (taskResponse.Status == TaskStatus.Created)
+                    {
+                        taskResponse.Start();
+                    }
+                    return taskResponse.ContinueWith(task =>
+                    {
+                        if (task.IsFaulted)
+                        {
+                            var ex = task.Exception.UnwrapIfSingleException();
+
+                            //Async Exception Handling
+                            var result = HandleException(request, requestDto, ex);
+
+                            if (result == null)
+                                return ex;
+
+                            return result;
+                        }
+
+                        response = task.GetResult();
+                        if (ResponseFilters != null)
+                        {
+                            //Async Exec ResponseFilters
+                            foreach (var responseFilter in ResponseFilters)
+                            {
+                                var attrInstance = responseFilter.Copy();
+                                container.AutoWire(attrInstance);
+
+                                attrInstance.ResponseFilter(request, request.Response, response);
+                                AppHost.Release(attrInstance);
+
+                                if (request.Response.IsClosed)
+                                    return null;
+                            }
+                        }
+
+                        return response;
+                    });
+                }
+
+                //Sync Exec ResponseFilters
                 if (ResponseFilters != null)
                 {
                     foreach (var responseFilter in ResponseFilters)
@@ -105,27 +160,10 @@ namespace ServiceStack.Host
                         var attrInstance = responseFilter.Copy();
                         container.AutoWire(attrInstance);
 
-                        var taskResponse = response as Task;
-                        if (taskResponse != null) 
-                        {
-                            return taskResponse.ContinueWith(task => {
-                                response = task.GetResult();
-                                attrInstance.ResponseFilter(request, request.Response, response);
-                                AppHost.Release(attrInstance);
+                        attrInstance.ResponseFilter(request, request.Response, response);
+                        AppHost.Release(attrInstance);
 
-                                if (request.Response.IsClosed)
-                                    return null;
-
-                                return response;
-                            });
-                        }
-                        else
-                        {
-                            attrInstance.ResponseFilter(request, request.Response, response);
-                            AppHost.Release(attrInstance);
-
-                            if (request.Response.IsClosed) return null;
-                        }
+                        if (request.Response.IsClosed) return null;
                     }
                 }
 
@@ -133,6 +171,7 @@ namespace ServiceStack.Host
             }
             catch (Exception ex)
             {
+                //Sync Exception Handling
                 var result = HandleException(request, requestDto, ex);
 
                 if (result == null) throw;

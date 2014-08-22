@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using Funq;
 using NUnit.Framework;
 using ServiceStack.Data;
@@ -259,6 +261,31 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public string[] Ratings { get; set; }
     }
 
+    public class QueryUnknownRockstars : QueryBase<Rockstar>
+    {
+        public int UnknownInt { get; set; }
+        public string UnknownProperty { get; set; }
+
+    }
+    [Route("/query/rockstar-references")]
+    public class QueryRockstarsWithReferences : QueryBase<RockstarReference>
+    {
+        public int? Age { get; set; }
+    }
+
+    [Alias("Rockstar")]
+    public class RockstarReference
+    {
+        public int Id { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public int? Age { get; set; }
+
+        [Reference]
+        public List<RockstarAlbum> Albums { get; set; } 
+    }
+
+
     public class AutoQueryService : Service
     {
         public IAutoQuery AutoQuery { get; set; }
@@ -308,6 +335,14 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public void TestFixtureTearDown()
         {
             appHost.Dispose();
+        }
+
+        [NUnit.Framework.Ignore("Debug Run")]
+        [Test]
+        public void RunFor10Mins()
+        {
+            Process.Start(Config.ListeningOn);
+            Thread.Sleep(TimeSpan.FromMinutes(10));
         }
 
         [Test]
@@ -776,6 +811,18 @@ namespace ServiceStack.WebHost.Endpoints.Tests
                 .ThenByDescending(x => x.ImdbId).Map(x => x.ImdbId);
             Assert.That(ids, Is.EqualTo(orderedIds));
 
+            movies = client.Get(new SearchMovies { Take = 100, OrderBy = "Rating,-ImdbId" });
+            ids = movies.Results.Map(x => x.ImdbId);
+            orderedIds = movies.Results.OrderBy(x => x.Rating)
+                .ThenByDescending(x => x.ImdbId).Map(x => x.ImdbId);
+            Assert.That(ids, Is.EqualTo(orderedIds));
+
+            movies = client.Get(new SearchMovies { Take = 100, OrderByDesc = "Rating,-ImdbId" });
+            ids = movies.Results.Map(x => x.ImdbId);
+            orderedIds = movies.Results.OrderByDescending(x => x.Rating)
+                .ThenBy(x => x.ImdbId).Map(x => x.ImdbId);
+            Assert.That(ids, Is.EqualTo(orderedIds));
+
             var url = Config.ListeningOn + "movies/search?take=100&orderBy=Rating,ImdbId";
             movies = url.AsJsonInto<Movie>();
             ids = movies.Results.Map(x => x.ImdbId);
@@ -810,6 +857,42 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             headers = csv.SplitOnFirst('\n')[0].Trim();
             Assert.That(headers, Is.EqualTo("FirstName,LastName,Age,RockstarAlbumName"));
             csv.Print();
+        }
+
+        [Test]
+        public void Does_not_query_Ignored_properties()
+        {
+            var response = client.Get(new QueryUnknownRockstars {
+                UnknownProperty = "Foo",
+                UnknownInt = 1,
+            });
+
+            Assert.That(response.Offset, Is.EqualTo(0));
+            Assert.That(response.Total, Is.EqualTo(TotalRockstars));
+            Assert.That(response.Results.Count, Is.EqualTo(TotalRockstars));
+        }
+
+        [Test]
+        public void Can_Query_Rockstars_with_References()
+        {
+            var response = client.Get(new QueryRockstarsWithReferences {
+                Age = 27
+            });
+         
+            response.PrintDump();
+
+            Assert.That(response.Results.Count, Is.EqualTo(3));
+
+            var jimi = response.Results.First(x => x.FirstName == "Jimi");
+            Assert.That(jimi.Albums.Count, Is.EqualTo(1));
+            Assert.That(jimi.Albums[0].Name, Is.EqualTo("Electric Ladyland"));
+
+            var jim = response.Results.First(x => x.FirstName == "Jim");
+            Assert.That(jim.Albums, Is.Null);
+
+            var kurt = response.Results.First(x => x.FirstName == "Kurt");
+            Assert.That(kurt.Albums.Count, Is.EqualTo(1));
+            Assert.That(kurt.Albums[0].Name, Is.EqualTo("Nevermind"));
         }
     }
 

@@ -27,6 +27,27 @@
     function pad(d) { return d < 10 ? '0' + d : d; };
     $.ss.dfmt = function (d) { return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()); };
     $.ss.dfmthm = function (d) { return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+    $.ss.tfmt12 = function (d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + " " + (d.getHours() > 12 ? "PM" : "AM"); };
+    $.ss.splitOnFirst = function (s, c) { if (!s) return [s]; var pos = s.indexOf(c); return pos >= 0 ? [s.substring(0, pos), s.substring(pos + 1)] : [s]; };
+    $.ss.splitOnLast = function (s, c) { if (!s) return [s]; var pos = s.lastIndexOf(c); return pos >= 0 ? [s.substring(0, pos), s.substring(pos + 1)] : [s]; };
+    $.ss.getSelection = function () {
+        return window.getSelection
+            ? window.getSelection().toString()
+            : document.selection && document.selection.type != "Control"
+                ? document.selection.createRange().text : "";
+    };
+    $.ss.queryString = function(url) {
+        if (!url) return {};
+        var pairs = $.ss.splitOnFirst(url, '?')[1].split('&');
+        var map = {};
+        for (var i = 0; i < pairs.length; ++i) {
+            var p = pairs[i].split('=');
+            map[p[0]] = p.length > 1
+                ? decodeURIComponent(p[1].replace(/\+/g, ' '))
+                : null;
+        }
+        return map;
+    };
 
     function splitCase(t) {
         return typeof t != 'string' ? t : t.replace( /([A-Z]|[0-9]+)/g , ' $1').replace( /_/g , ' ');
@@ -270,6 +291,74 @@
             .addClass('active')
             .closest("li").addClass('active');
         });
+    };
+
+    $.ss.eventReceivers = {};
+    $.fn.handleServerEvents = function (opt) {
+        var source = this[0];
+        opt = opt || {};
+        if (opt.handlers) {
+            $.extend($.ss.handlers, opt.handlers);
+        }
+        source.addEventListener('message', function (e) {
+            var parts = $.ss.splitOnFirst(e.data, ' ');
+            var selector = parts[0];
+            var json = parts[1];
+            var msg = json ? JSON.parse(json) : null;
+
+            parts = $.ss.splitOnFirst(selector, '.');
+            var op = parts[0],
+                target = parts[1].replace(new RegExp("%20",'g')," ");
+
+            if (opt.validate && opt.validate(op, target, msg, json) === false)
+                return;
+
+            var tokens = $.ss.splitOnFirst(target, '$'), 
+                cmd = tokens[0], cssSel = tokens[1],
+                $els = cssSel && $(cssSel), el = $els && $els[0];
+            if (op == "cmd") {
+                if (cmd == "onConnect") {
+                    $.extend(opt, msg);
+                    if (opt.heartbeatUrl) {
+                        if (opt.heartbeat) {
+                            window.clearInterval(opt.heartbeat);
+                        }
+                        opt.heartbeat = window.setInterval(function () {
+                            $.post(opt.heartbeatUrl, null, function(r) {});
+                        }, parseInt(opt.heartbeatIntervalMs) || 10000);
+                    }
+                    if (opt.unRegisterUrl) {
+                        $(window).unload(function () {
+                            $.post(opt.unRegisterUrl, null, function(r) {});
+                        });
+                    }
+                }
+                var fn = $.ss.handlers[cmd];
+                if (fn) {
+                    fn.call(el || document.body, msg, e);
+                }
+            }
+            else if (op == "trigger") {
+                $(el || document).trigger(cmd, [msg, e]);
+            }
+            else if (op == "css") {
+                $($els || document.body).css(cmd, msg, e);
+            }
+            else {
+                var r = opt.receivers && opt.receivers[op] || $.ss.eventReceivers[op];
+                if (r) {
+                    if (typeof (r[cmd]) == "function") {
+                        r[cmd].call(el || r[cmd], msg, e);
+                    } else {
+                        r[cmd] = msg;
+                    }
+                }
+            }
+
+            if (opt.success) {
+                opt.success(selector, msg, e);
+            }
+        }, false);
     };
 
 })(window.jQuery);

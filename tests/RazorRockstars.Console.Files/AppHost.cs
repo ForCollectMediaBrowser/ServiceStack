@@ -27,6 +27,7 @@ namespace RazorRockstars.Console.Files
             Plugins.Add(new SwaggerFeature());
             Plugins.Add(new RequestInfoFeature());
             Plugins.Add(new RequestLogsFeature());
+            Plugins.Add(new ServerEventsFeature());
 
             Plugins.Add(new ValidationFeature());
             container.RegisterValidators(typeof(AutoValidationValidator).Assembly);
@@ -229,5 +230,37 @@ namespace RazorRockstars.Console.Files
     public class RedirectWithoutQueryString
     {
         public int Id { get; set; }
+    }
+
+
+    [Route("/channels/{Channel}/raw")]
+    public class PostRawToChannel : IReturnVoid
+    {
+        public string From { get; set; }
+        public string ToUserId { get; set; }
+        public string Channel { get; set; }
+        public string Message { get; set; }
+        public string Selector { get; set; }
+    }
+
+    public class ServerEventsService : Service
+    {
+        public IServerEvents ServerEvents { get; set; }
+
+        public void Any(PostRawToChannel request)
+        {
+            var sub = ServerEvents.GetSubscription(request.From);
+            if (sub == null)
+                throw HttpError.NotFound("Subscription {0} does not exist".Fmt(request.From));
+
+            if (request.ToUserId != null)
+            {
+                ServerEvents.NotifyUserId(request.ToUserId, request.Selector, request.Message);
+            }
+            else
+            {
+                ServerEvents.NotifyChannel(request.Channel, request.Selector, request.Message);
+            }
+        }
     }
 }

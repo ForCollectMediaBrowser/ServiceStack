@@ -1,10 +1,11 @@
 ﻿using System;
 using System.Text.RegularExpressions;
 using ServiceStack.Host.Handlers;
+using ServiceStack.IO;
 
 namespace ServiceStack.Api.Swagger
 {
-    public class SwaggerFeature : IPlugin
+    public class SwaggerFeature : IPlugin, IPreInitPlugin
     {
         /// <summary>
         /// Gets or sets <see cref="Regex"/> pattern to filter available resources. 
@@ -17,9 +18,23 @@ namespace ServiceStack.Api.Swagger
 
         public bool DisableAutoDtoInBodyParam { get; set; }
 
+        public bool UseBootstrapTheme { get; set; }
+
+        public string LogoUrl { get; set; }
+
         public Action<SwaggerModel> ModelFilter { get; set; }
 
         public Action<ModelProperty> ModelPropertyFilter { get; set; }
+
+        public SwaggerFeature()
+        {
+            LogoUrl = "//raw.githubusercontent.com/ServiceStack/Assets/master/img/artwork/logo-24.png";
+        }
+
+        public void Configure(IAppHost appHost)
+        {
+            appHost.Config.EmbeddedResourceSources.Add(typeof(SwaggerFeature).Assembly);
+        }
 
         public void Register(IAppHost appHost)
         {
@@ -35,28 +50,47 @@ namespace ServiceStack.Api.Swagger
             appHost.RegisterService(typeof(SwaggerResourcesService), new[] { "/resources" });
             appHost.RegisterService(typeof(SwaggerApiService), new[] { SwaggerResourcesService.RESOURCE_PATH + "/{Name*}" });
 
+            var swaggerUrl = UseBootstrapTheme
+                ? "swagger-ui-bootstrap/"
+                : "swagger-ui/";
+
             appHost.GetPlugin<MetadataFeature>()
-                .AddPluginLink("swagger-ui/", "Swagger UI");
+                .AddPluginLink(swaggerUrl, "Swagger UI");
 
             appHost.CatchAllHandlers.Add((httpMethod, pathInfo, filePath) =>
             {
-                if (pathInfo == "/swagger-ui" || pathInfo == "/swagger-ui/" || pathInfo == "/swagger-ui/default.html")
+                IVirtualFile indexFile;
+                switch (pathInfo)
                 {
-                    var indexFile = appHost.VirtualPathProvider.GetFile("/swagger-ui/index.html");
-                    if (indexFile != null)
-                    {
-                        var html = indexFile.ReadAllText();
-
-                        return new CustomResponseHandler((req, res) =>
-                        {
-                            res.ContentType = MimeTypes.Html;
-                            var resourcesUrl = req.ResolveAbsoluteUrl("~/resources");
-                            html = html.Replace("http://petstore.swagger.wordnik.com/api/api-docs", resourcesUrl);
-                            return html;
-                        });
-                    }
+                    case "/swagger-ui":
+                    case "/swagger-ui/":
+                    case "/swagger-ui/default.html":
+                        indexFile = appHost.VirtualPathProvider.GetFile("/swagger-ui/index.html");
+                        break;
+                    case "/swagger-ui-bootstrap":
+                    case "/swagger-ui-bootstrap/":
+                    case "/swagger-ui-bootstrap/index.html":
+                        indexFile = appHost.VirtualPathProvider.GetFile("/swagger-ui-bootstrap/index.html");
+                        break;
+                    default:
+                        indexFile = null;
+                        break;
                 }
-                return null;
+                if (indexFile != null)
+                {
+                    var html = indexFile.ReadAllText();
+
+                    return new CustomResponseHandler((req, res) =>
+                    {
+                        res.ContentType = MimeTypes.Html;
+                        var resourcesUrl = req.ResolveAbsoluteUrl("~/resources");
+                        html = html.Replace("http://petstore.swagger.wordnik.com/api/api-docs", resourcesUrl)
+                            .Replace("ApiDocs", HostContext.ServiceName)
+                            .Replace("{LogoUrl}", LogoUrl);
+                        return html;
+                    });
+                }
+                return pathInfo.StartsWith("/swagger-ui") ? new StaticFileHandler() : null;
             });
         }
 

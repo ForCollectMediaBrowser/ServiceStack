@@ -29,19 +29,14 @@ COPY ..\src\ServiceStack.ProtoBuf\bin\%BUILD%\ServiceStack.ProtoBuf.* ..\NuGet\S
 COPY ..\lib\MsgPack.dll ..\NuGet\ServiceStack.MsgPack\lib\net40
 COPY ..\src\ServiceStack.MsgPack\bin\%BUILD%\ServiceStack.MsgPack.* ..\NuGet\ServiceStack.MsgPack\lib\net40
 
-IF EXIST ..\..\swagger-ui\dist-remove (    
-    RMDIR ..\tests\ServiceStack.WebHost.IntegrationTests\swagger-ui /s /q
-    MD ..\tests\ServiceStack.WebHost.IntegrationTests\swagger-ui
-
+IF EXIST ..\..\swagger-ui\dist-disable (    
     RMDIR ..\NuGet\ServiceStack.Api.Swagger\content\swagger-ui /s /q
     MD ..\NuGet\ServiceStack.Api.Swagger\content\swagger-ui
 
     RMDIR ..\src\ServiceStack.Api.Swagger\swagger-ui /s /q
     MD ..\src\ServiceStack.Api.Swagger\swagger-ui
 
-    XCOPY /E ..\..\swagger-ui\dist ..\tests\ServiceStack.WebHost.IntegrationTests\swagger-ui
     XCOPY /E ..\..\swagger-ui\dist ..\src\ServiceStack.Api.Swagger\swagger-ui
-    XCOPY /E ..\..\swagger-ui\dist ..\NuGet\ServiceStack.Api.Swagger\content\swagger-ui
 )
 
 COPY ..\src\ServiceStack.Api.Swagger\bin\%BUILD%\ServiceStack.Api.Swagger.* ..\NuGet\ServiceStack.Api.Swagger\lib\net35
@@ -72,7 +67,7 @@ COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Client.dll ..\..\ServiceStack.
 COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Client.pdb ..\..\ServiceStack.OrmLite\lib
 COPY ..\tests\ServiceStack.Common.Tests\bin\%BUILD%\ServiceStack.Common.Tests.* ..\..\ServiceStack.OrmLite\lib\tests
 
-COPY ..\src\ServiceStack.Interfaces\bin\%BUILD%\ServiceStack.Interfaces.* ..\lib
+COPY ..\src\ServiceStack.Interfaces\bin\Pcl\ServiceStack.Interfaces.* ..\lib
 COPY ..\src\ServiceStack.Common\bin\%BUILD%\ServiceStack.Common.* ..\lib
 COPY ..\src\ServiceStack.Client\bin\%BUILD%\ServiceStack.Client.* ..\lib
 

@@ -3,6 +3,8 @@
 using System;
 using System.Collections.Generic;
 using System.DirectoryServices.AccountManagement;
+using System.Net;
+using System.Threading;
 using Funq;
 using ServiceStack.Admin;
 using ServiceStack.Auth;
@@ -18,6 +20,7 @@ using ServiceStack.MiniProfiler.Data;
 using ServiceStack.OrmLite;
 using ServiceStack.Razor;
 using ServiceStack.Text;
+using ServiceStack.Web;
 
 #if HTTP_LISTENER
 namespace ServiceStack.Auth.Tests
@@ -39,6 +42,7 @@ namespace ServiceStack.AuthWeb.Tests
         public override void Configure(Container container)
         {
             Plugins.Add(new RazorFormat());
+            Plugins.Add(new ServerEventsFeature());
 
             container.Register(new DataSource());
 
@@ -89,7 +93,7 @@ namespace ServiceStack.AuthWeb.Tests
                         LoadUserAuthFilter = LoadUserAuthInfo,
                         AllowAllWindowsAuthUsers = true
                     }, 
-                    new CredentialsAuthProvider(),              //HTML Form post of UserName/Password credentials
+                    new CustomCredentialsAuthProvider(),        //HTML Form post of UserName/Password credentials
                     new TwitterAuthProvider(appSettings),       //Sign-in with Twitter
                     new FacebookAuthProvider(appSettings),      //Sign-in with Facebook
                     new DigestAuthProvider(appSettings),        //Sign-in with Digest Auth
@@ -126,6 +130,15 @@ namespace ServiceStack.AuthWeb.Tests
             else
                 authRepo.InitSchema();   //Create only the missing tables
 
+            authRepo.CreateUserAuth(new UserAuth
+                {
+                    DisplayName = "Credentials",
+                    FirstName = "First",
+                    LastName = "Last",
+                    FullName = "First Last",
+                    Email = "demis.bellot@gmail.com",
+                }, "test");
+
             Plugins.Add(new RequestLogsFeature());
         }
 
@@ -159,7 +172,29 @@ namespace ServiceStack.AuthWeb.Tests
                 Log.Error("Could not retrieve windows user info for '{0}'".Fmt(tokens.DisplayName), ex);
             }
         }
+    }
 
+    public class CustomCredentialsAuthProvider : CredentialsAuthProvider
+    {
+        public override bool TryAuthenticate(IServiceBase authService, string userName, string password)
+        {
+            if (password == "test")
+                return true;
+
+            throw HttpError.Unauthorized("Custom Error Message");
+        }
+
+        public override object Authenticate(IServiceBase authService, IAuthSession session, Authenticate request)
+        {
+            try
+            {
+                return base.Authenticate(authService, session, request);
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+        }
     }
 
     //Provide extra validation for the registration process
@@ -193,5 +228,91 @@ namespace ServiceStack.AuthWeb.Tests
         public string CustomField { get; set; }
     }
 
+    [Route("/channels/{Channel}/chat")]
+    public class PostChatToChannel : IReturn<ChatMessage>
+    {
+        public string From { get; set; }
+        public string ToUserId { get; set; }
+        public string Channel { get; set; }
+        public string Message { get; set; }
+        public string Selector { get; set; }
+    }
+
+    public class ChatMessage
+    {
+        public long Id { get; set; }
+        public string FromUserId { get; set; }
+        public string FromName { get; set; }
+        public string DisplayName { get; set; }
+        public string Message { get; set; }
+        public string UserAuthId { get; set; }
+        public bool Private { get; set; }
+    }
+
+    [Route("/channels/{Channel}/raw")]
+    public class PostRawToChannel : IReturnVoid
+    {
+        public string From { get; set; }
+        public string ToUserId { get; set; }
+        public string Channel { get; set; }
+        public string Message { get; set; }
+        public string Selector { get; set; }
+    }
+
+    public class ServerEventsService : Service
+    {
+        private static long msgId;
+
+        public IServerEvents ServerEvents { get; set; }
+
+        public object Any(PostChatToChannel request)
+        {
+            var sub = ServerEvents.GetSubscription(request.From);
+            if (sub == null)
+                throw HttpError.NotFound("Subscription {0} does not exist".Fmt(request.From));
+
+            var msg = new ChatMessage
+            {
+                Id = Interlocked.Increment(ref msgId),
+                FromUserId = sub.UserId,
+                FromName = sub.DisplayName,
+                Message = request.Message,
+            };
+
+            if (request.ToUserId != null)
+            {
+                msg.Private = true;
+                ServerEvents.NotifyUserId(request.ToUserId, request.Selector, msg);
+                var toSubs = ServerEvents.GetSubscriptionsByUserId(request.ToUserId);
+                foreach (var toSub in toSubs)
+                {
+                    msg.Message = "@{0}: {1}".Fmt(toSub.DisplayName, msg.Message);
+                    ServerEvents.NotifySubscription(request.From, request.Selector, msg);
+                }
+            }
+            else
+            {
+                ServerEvents.NotifyChannel(request.Channel, request.Selector, msg);
+            }
+
+            return msg;
+        }
+
+        public void Any(PostRawToChannel request)
+        {
+            var sub = ServerEvents.GetSubscription(request.From);
+            if (sub == null)
+                throw HttpError.NotFound("Subscription {0} does not exist".Fmt(request.From));
+
+            if (request.ToUserId != null)
+            {
+                ServerEvents.NotifyUserId(request.ToUserId, request.Selector, request.Message);
+            }
+            else
+            {
+                ServerEvents.NotifyChannel(request.Channel, request.Selector, request.Message);
+            }
+        }
+    }
 
 }

@@ -74,10 +74,10 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
                 response = client.Post(request);
                 Assert.That(request.T01.Id, Is.EqualTo(response.T01.Id));
-            }
 
-            Assert.Throws<LicenseException>(() =>
-                MegaDto.Create().ToJson());
+                Assert.Throws<LicenseException>(() =>
+                    MegaDto.Create().ToJson());
+            }
         }
     }
 
@@ -269,6 +269,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
             public override void Configure(Container container)
             {
+                Plugins.RemoveAll(x => x is NativeTypesFeature);
             }
         }
     }

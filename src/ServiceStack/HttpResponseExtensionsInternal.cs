@@ -204,19 +204,6 @@ namespace ServiceStack
                         }
                     }
 
-                    var disposableResult = result as IDisposable;
-                    if (WriteToOutputStream(response, result, bodyPrefix, bodySuffix))
-                    {
-                        response.Flush(); //required for Compression
-                        if (disposableResult != null) disposableResult.Dispose();
-                        return TrueTask;
-                    }
-
-                    if (httpResult != null)
-                    {
-                        result = httpResult.Response;
-                    }
-
                     //ContentType='text/html' is the default for a HttpResponse
                     //Do not override if another has been set
                     if (response.ContentType == null || response.ContentType == MimeTypes.Html)
@@ -231,6 +218,19 @@ namespace ServiceStack
                     if (HostContext.Config.AppendUtf8CharsetOnContentTypes.Contains(response.ContentType))
                     {
                         response.ContentType += ContentFormat.Utf8Suffix;
+                    }
+
+                    var disposableResult = result as IDisposable;
+                    if (WriteToOutputStream(response, result, bodyPrefix, bodySuffix))
+                    {
+                        response.Flush(); //required for Compression
+                        if (disposableResult != null) disposableResult.Dispose();
+                        return TrueTask;
+                    }
+
+                    if (httpResult != null)
+                    {
+                        result = httpResult.Response;
                     }
 
                     var responseText = result as string;

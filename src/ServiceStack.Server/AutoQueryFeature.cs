@@ -8,7 +8,7 @@ using System.Reflection.Emit;
 using System.Threading;
 
 using Funq;
-using ServiceStack.Configuration;
+using ServiceStack.Host;
 using ServiceStack.MiniProfiler;
 using ServiceStack.Reflection;
 using ServiceStack.Text;
@@ -20,10 +20,11 @@ namespace ServiceStack
 {
     public delegate ISqlExpression QueryFilterDelegate(IRequest request, ISqlExpression sqlExpression, IQuery model);
 
-    public class AutoQueryFeature : IPlugin
+    public class AutoQueryFeature : IPlugin, IPostInitPlugin
     {
         public HashSet<string> IgnoreProperties { get; set; }
-        public HashSet<string> IllegalSqlFragmentTokens { get; set; } 
+        public HashSet<string> IllegalSqlFragmentTokens { get; set; }
+        public HashSet<Assembly> LoadFromAssemblies { get; set; } 
         public int? MaxLimit { get; set; }
         public string UseNamedConnection { get; set; }
         public bool EnableUntypedQueries { get; set; }
@@ -39,14 +40,14 @@ namespace ServiceStack
         
         public Dictionary<string, string> ImplicitConventions = new Dictionary<string, string> 
         {
-            {"Above%",          GreaterThanFormat},
+            {"%Above%",         GreaterThanFormat},
             {"Begin%",          GreaterThanFormat},
-            {"Beyond%",         GreaterThanFormat},
-            {"Over%",           GreaterThanFormat},
+            {"%Beyond%",        GreaterThanFormat},
+            {"%Over%",          GreaterThanFormat},
             {"%OlderThan",      GreaterThanFormat},
-            {"After%",          GreaterThanFormat},
+            {"%After%",         GreaterThanFormat},
             {"OnOrAfter%",      GreaterThanOrEqualFormat},
-            {"From%",           GreaterThanOrEqualFormat},
+            {"%From%",          GreaterThanOrEqualFormat},
             {"Since%",          GreaterThanOrEqualFormat},
             {"Start%",          GreaterThanOrEqualFormat},
             {"%Higher%",        GreaterThanOrEqualFormat},
@@ -59,10 +60,10 @@ namespace ServiceStack
             {"%LessThanOrEqualTo%",    LessThanOrEqualFormat},
 
             {"Behind%",         LessThanFormat},
-            {"Below%",          LessThanFormat},
-            {"Under%",          LessThanFormat},
+            {"%Below%",         LessThanFormat},
+            {"%Under%",         LessThanFormat},
             {"%Lower%",         LessThanFormat},
-            {"Before%",         LessThanFormat},
+            {"%Before%",        LessThanFormat},
             {"%YoungerThan",    LessThanFormat},
             {"OnOrBefore%",     LessThanOrEqualFormat},
             {"End%",            LessThanOrEqualFormat},
@@ -97,6 +98,7 @@ namespace ServiceStack
             QueryFilters = new Dictionary<Type, QueryFilterDelegate>();
             EnableUntypedQueries = true;
             OrderByPrimaryKeyOnPagedQuery = true;
+            LoadFromAssemblies = new HashSet<Assembly>();
         }
 
         public void Register(IAppHost appHost)
@@ -130,13 +132,14 @@ namespace ServiceStack
                 })
                 .ReusedWithin(ReuseScope.None);
 
-            appHost.AfterInitCallbacks.Add(OnAfterLoad);
+            appHost.Metadata.GetOperationAssemblies()
+                .Each(x => LoadFromAssemblies.Add(x));
         }
 
-        void OnAfterLoad(IAppHost appHost)
+        public void AfterPluginsLoaded(IAppHost appHost)
         {
-            var ssHost = (ServiceStackHost)appHost;
-            var scannedTypes = ssHost.ServiceController.ResolveServicesFn();
+            var scannedTypes = LoadFromAssemblies.SelectMany(x => x.GetTypes());
+
             var misingRequestTypes = scannedTypes
                 .Where(x => x.HasInterface(typeof(IQuery)))
                 .Where(x => !appHost.Metadata.OperationsMap.ContainsKey(x))
@@ -701,7 +704,7 @@ namespace ServiceStack
                 {
                     Offset = q.Offset.GetValueOrDefault(0),
                     Total = (int)db.Count(q),
-                    Results = db.Select<Into, From>(q),
+                    Results = db.LoadSelect<Into, From>(q),
                 };
 
                 return response;
