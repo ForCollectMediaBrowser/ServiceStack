@@ -157,9 +157,11 @@ namespace ServiceStack.Host
             }
         }
 
-        public static object CreateRequest(IRequest httpReq, IRestPath restPath, Dictionary<string, string> requestParams)
+        public static object CreateRequest(IRequest httpReq, IRestPath restPath, Dictionary<string, string> requestParams, bool createContentTypeRequest = true)
         {
-            var requestDto = CreateContentTypeRequest(httpReq, restPath.RequestType, httpReq.ContentType);
+            var requestDto = createContentTypeRequest ? 
+                CreateContentTypeRequest(httpReq, restPath.RequestType, httpReq.ContentType) :
+                null;
 
             string contentType;
             var pathInfo = !restPath.IsWildCardPath
