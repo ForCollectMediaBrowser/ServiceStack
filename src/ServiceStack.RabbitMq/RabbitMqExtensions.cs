@@ -30,7 +30,12 @@ namespace ServiceStack.RabbitMq
 
         public static void RegisterTopicExchange(this IModel channel, string exchangeName = null)
         {
-            channel.ExchangeDeclare(exchangeName ?? QueueNames.ExchangeTopic, "fanout", durable: false, autoDelete: false, arguments:null);
+            channel.ExchangeDeclare(exchangeName ?? QueueNames.ExchangeTopic, "topic", durable: false, autoDelete: false, arguments: null);
+        }
+
+        public static void RegisterFanoutExchange(this IModel channel, string exchangeName)
+        {
+            channel.ExchangeDeclare(exchangeName, "fanout", durable: false, autoDelete: false, arguments: null);
         }
 
         public static void RegisterQueues<T>(this IModel channel)
@@ -143,12 +148,29 @@ namespace ServiceStack.RabbitMq
             return ex.Message.Contains("code=404");
         }
 
+        public static bool IsServerNamedQueue(this string queueName)
+        {
+            if (string.IsNullOrEmpty(queueName))
+            {
+                throw new ArgumentNullException("queueName");
+            }
+
+            var lowerCaseQueue = queueName.ToLower();
+            return lowerCaseQueue.StartsWith("amq.")
+                || lowerCaseQueue.StartsWith(QueueNames.TempMqPrefix);
+        }	
+
         public static void PopulateFromMessage(this IBasicProperties props, IMessage message)
         {
             props.MessageId = message.Id.ToString();
             props.Timestamp = new AmqpTimestamp(message.CreatedDate.ToUnixTime());
             props.Priority = (byte)message.Priority;
             props.ContentType = MimeTypes.Json;
+            
+            if (message.Body != null)
+            {
+                props.Type = message.Body.GetType().Name;
+            }
 
             if (message.ReplyTo != null)
             {

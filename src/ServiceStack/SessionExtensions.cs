@@ -23,18 +23,20 @@ namespace ServiceStack
             var sessionOptions = GetSessionOptions(httpReq);
 
             return sessionOptions.Contains(SessionOptions.Permanent)
-                ? httpReq.GetItemOrCookie(SessionFeature.PermanentSessionId)
-                : httpReq.GetItemOrCookie(SessionFeature.SessionId);
+                ? httpReq.GetPermanentSessionId()
+                : httpReq.GetTemporarySessionId();
         }
 
         public static string GetPermanentSessionId(this IRequest httpReq)
         {
-            return httpReq.GetItemOrCookie(SessionFeature.PermanentSessionId);
+            return httpReq.GetItemOrCookie(SessionFeature.PermanentSessionId)
+                ?? httpReq.GetHeader("X-" + SessionFeature.PermanentSessionId);
         }
 
         public static string GetTemporarySessionId(this IRequest httpReq)
         {
-            return httpReq.GetItemOrCookie(SessionFeature.SessionId);
+            return httpReq.GetItemOrCookie(SessionFeature.SessionId)
+                ?? httpReq.GetHeader("X-" + SessionFeature.SessionId);
         }
 
         /// <summary>
@@ -117,6 +119,13 @@ namespace ServiceStack
         public static HashSet<string> GetSessionOptions(this IRequest httpReq)
         {
             var sessionOptions = httpReq.GetItemOrCookie(SessionFeature.SessionOptionsKey);
+            var headerOptions = httpReq.GetHeader("X-" + SessionFeature.SessionOptionsKey);
+            if (headerOptions != null)
+            {
+                sessionOptions = sessionOptions.IsNullOrEmpty()
+                    ? headerOptions
+                    : headerOptions + "," + sessionOptions;
+            }                
             return sessionOptions.IsNullOrEmpty()
                 ? new HashSet<string>()
                 : sessionOptions.Split(',').ToHashSet();
@@ -215,6 +224,27 @@ namespace ServiceStack
         public static void ClearSession(this ICacheClient cache, IRequest httpReq = null)
         {
             cache.Remove(GetSessionKey(httpReq));
+        }
+
+        public static ISession GetSessionBag(this IRequest request)
+        {
+            var factory = request.TryResolve<ISessionFactory>() ?? new SessionFactory(request.GetCacheClient());
+            return factory.GetOrCreateSession(request, request.Response);
+        }
+
+        public static ISession GetSessionBag(this IServiceBase service)
+        {
+            return service.Request.GetSessionBag();
+        }
+
+        public static T Get<T>(this ISession session)
+        {
+            return session.Get<T>(typeof(T).Name);
+        }
+
+        public static void Set<T>(this ISession session, T value)
+        {
+            session.Set(typeof(T).Name, value);
         }
     }
 }

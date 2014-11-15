@@ -1590,6 +1590,8 @@ namespace ServiceStack
 #endif
         ;
 
+        public static readonly Task<object> EmptyTask;
+
         static PclExportClient()
         {
             if (Instance != null) 
@@ -1607,6 +1609,10 @@ namespace ServiceStack
                     return;
             }
             catch (Exception /*ignore*/) {}
+
+            var tcs = new TaskCompletionSource<object>();
+            tcs.SetResult(null);
+            EmptyTask = tcs.Task;
         }
 
         public static bool ConfigureProvider(string typeName)
@@ -1690,6 +1696,13 @@ namespace ServiceStack
             }
         }
 
+        public virtual string GetHeader(WebHeaderCollection headers, string name, Func<string, bool> valuePredicate)
+        {
+            return null;
+            var header = headers[name];
+            return valuePredicate(header) ? header : null;
+        }
+
         public virtual void SetCookieContainer(HttpWebRequest webRequest, ServiceClientBase client)
         {
             webRequest.CookieContainer = client.CookieContainer;
@@ -1704,13 +1717,25 @@ namespace ServiceStack
         {
         }
 
-        public virtual ITimer CreateTimer<TResponse>(AsyncState<TResponse> state, TimeSpan timeOut)
+        public virtual ITimer CreateTimer(TimerCallback cb, TimeSpan timeOut, object state)
         {
 #if PCL
-            return new Timer(state.TimedOut, state, (int)timeOut.TotalMilliseconds);
+            return new Timer(cb, state, (int)timeOut.TotalMilliseconds);
 #else
             return new AsyncTimer(new
-                System.Threading.Timer(state.TimedOut, state, (int)timeOut.TotalMilliseconds, Timeout.Infinite));
+                System.Threading.Timer(cb, state, (int)timeOut.TotalMilliseconds, Timeout.Infinite));
+#endif
+        }
+
+        public virtual Task WaitAsync(int waitForMs)
+        {
+#if PCL
+            return EmptyTask;
+#else
+            var tcs = new TaskCompletionSource<object>();
+            Thread.Sleep(waitForMs);
+            tcs.SetResult(null);
+            return tcs.Task;
 #endif
         }
 

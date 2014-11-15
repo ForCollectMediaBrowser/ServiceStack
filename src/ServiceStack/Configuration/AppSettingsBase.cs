@@ -8,9 +8,11 @@ namespace ServiceStack.Configuration
 {
     public delegate string ParsingStrategyDelegate(string originalSetting);
 
-    public class AppSettingsBase : IAppSettings
+    public class AppSettingsBase : IAppSettings, ISettingsWriter
     {
         protected ISettings settings;
+        protected ISettingsWriter settingsWriter; 
+
         protected const string ErrorAppsettingNotFound = "Unable to find App Setting: {0}";
 
         public string Tier { get; set; }
@@ -19,18 +21,49 @@ namespace ServiceStack.Configuration
 
         public AppSettingsBase(ISettings settings=null)
         {
+            Init(settings);
+        }
+
+        protected void Init(ISettings settings)
+        {
             this.settings = settings;
+            this.settingsWriter = settings as ISettingsWriter;
         }
 
         public virtual string GetNullableString(string name)
         {
             var value = Tier != null
-                ? settings.Get("{0}.{1}".Fmt(Tier, name)) ?? settings.Get(name)
-                : settings.Get(name);
+                ? Get("{0}.{1}".Fmt(Tier, name)) ?? Get(name)
+                : Get(name);
 
             return ParsingStrategy != null
                 ? ParsingStrategy(value)
                 : value;
+        }
+
+        public string Get(string name)
+        {
+            if (settingsWriter != null)
+            {
+                var value = settingsWriter.Get(name);
+                if (value != null)
+                    return value;
+            }
+            return settings.Get(name);
+        }
+
+        public virtual List<string> GetAllKeys()
+        {
+            var keys = settings.GetAllKeys().ToHashSet();
+            if (settingsWriter != null)
+                settingsWriter.GetAllKeys().Each(x => keys.Add(x));
+
+            return keys.ToList();
+        }
+
+        public virtual bool Exists(string key)
+        {
+            return GetNullableString(key) != null;
         }
 
         public virtual string GetString(string name)
@@ -96,6 +129,14 @@ namespace ServiceStack.Configuration
             }
 
             return ret;
+        }
+
+        public virtual void Set<T>(string key, T value)
+        {
+            if (settingsWriter == null)
+                settingsWriter = new DictionarySettings();
+
+            settingsWriter.Set(key, value);
         }
     }
 

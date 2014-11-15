@@ -70,10 +70,16 @@ COPY ..\tests\ServiceStack.Common.Tests\bin\%BUILD%\ServiceStack.Common.Tests.* 
 COPY ..\src\ServiceStack.Interfaces\bin\Pcl\ServiceStack.Interfaces.* ..\lib
 COPY ..\src\ServiceStack.Common\bin\%BUILD%\ServiceStack.Common.* ..\lib
 COPY ..\src\ServiceStack.Client\bin\%BUILD%\ServiceStack.Client.* ..\lib
+COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.dll ..\lib
+COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.pdb ..\lib
 
 COPY ..\lib\ServiceStack.Interfaces.dll ..\..\ServiceStack.Text\lib
 COPY ..\lib\ServiceStack.Interfaces.dll ..\..\ServiceStack.Redis\lib
 COPY ..\lib\ServiceStack.Interfaces.dll ..\..\ServiceStack.OrmLite\lib
+
+COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Client.dll ..\..\Stripe\lib
+COPY ..\src\ServiceStack\bin\%BUILD%\ServiceStack.Client.pdb ..\..\Stripe\lib
+COPY ..\lib\ServiceStack.Interfaces.dll ..\..\Stripe\lib
 
 COPY ..\src\ServiceStack.Razor.BuildTask\bin\%BUILD%\ServiceStack.Razor.BuildTask.dll ..\lib
 

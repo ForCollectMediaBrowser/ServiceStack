@@ -93,7 +93,7 @@ namespace ServiceStack.AuthWeb.Tests
                         LoadUserAuthFilter = LoadUserAuthInfo,
                         AllowAllWindowsAuthUsers = true
                     }, 
-                    new CustomCredentialsAuthProvider(),        //HTML Form post of UserName/Password credentials
+                    new CredentialsAuthProvider(),        //HTML Form post of UserName/Password credentials
                     new TwitterAuthProvider(appSettings),       //Sign-in with Twitter
                     new FacebookAuthProvider(appSettings),      //Sign-in with Facebook
                     new DigestAuthProvider(appSettings),        //Sign-in with Digest Auth
@@ -118,7 +118,7 @@ namespace ServiceStack.AuthWeb.Tests
             Plugins.Add(new RegistrationFeature());
 
             //override the default registration validation with your own custom implementation
-            container.RegisterAs<CustomRegistrationValidator, IValidator<Register>>();
+            Plugins.Add(new CustomRegisterPlugin());
 
             //Store User Data into the referenced SqlServer database
             container.Register<IAuthRepository>(c =>
@@ -198,14 +198,23 @@ namespace ServiceStack.AuthWeb.Tests
     }
 
     //Provide extra validation for the registration process
-    public class CustomRegistrationValidator : RegistrationValidator
+    public class CustomRegisterPlugin : IPlugin
     {
-        public CustomRegistrationValidator()
+        public class CustomRegistrationValidator : RegistrationValidator
         {
-            RuleSet(ApplyTo.Post, () =>
+            public CustomRegistrationValidator()
             {
-                RuleFor(x => x.DisplayName).NotEmpty();
-            });
+                RuleSet(ApplyTo.Post, () =>
+                {
+                    RuleFor(x => x.UserName).Must(x => false)
+                        .WithMessage("CustomRegistrationValidator is fired");
+                });
+            }
+        }
+
+        public void Register(IAppHost appHost)
+        {
+            appHost.RegisterAs<CustomRegistrationValidator, IValidator<Register>>();
         }
     }
 
@@ -267,7 +276,7 @@ namespace ServiceStack.AuthWeb.Tests
 
         public object Any(PostChatToChannel request)
         {
-            var sub = ServerEvents.GetSubscription(request.From);
+            var sub = ServerEvents.GetSubscriptionInfo(request.From);
             if (sub == null)
                 throw HttpError.NotFound("Subscription {0} does not exist".Fmt(request.From));
 
@@ -283,7 +292,7 @@ namespace ServiceStack.AuthWeb.Tests
             {
                 msg.Private = true;
                 ServerEvents.NotifyUserId(request.ToUserId, request.Selector, msg);
-                var toSubs = ServerEvents.GetSubscriptionsByUserId(request.ToUserId);
+                var toSubs = ServerEvents.GetSubscriptionInfosByUserId(request.ToUserId);
                 foreach (var toSub in toSubs)
                 {
                     msg.Message = "@{0}: {1}".Fmt(toSub.DisplayName, msg.Message);
@@ -300,7 +309,7 @@ namespace ServiceStack.AuthWeb.Tests
 
         public void Any(PostRawToChannel request)
         {
-            var sub = ServerEvents.GetSubscription(request.From);
+            var sub = ServerEvents.GetSubscriptionInfo(request.From);
             if (sub == null)
                 throw HttpError.NotFound("Subscription {0} does not exist".Fmt(request.From));
 

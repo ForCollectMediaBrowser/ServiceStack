@@ -51,6 +51,7 @@ namespace ServiceStack
             this.StartedAt = DateTime.UtcNow;
 
             ServiceName = serviceName;
+            AppSettings = new AppSettings();
             Container = new Container { DefaultOwner = Owner.External };
             ServiceController = CreateServiceController(assembliesWithServices);
 
@@ -71,6 +72,7 @@ namespace ServiceStack
             ServiceExceptionHandlers = new List<HandleServiceExceptionDelegate>();
             UncaughtExceptionHandlers = new List<HandleUncaughtExceptionDelegate>();
             AfterInitCallbacks = new List<Action<IAppHost>>();
+            OnDisposeCallbacks = new List<Action<IAppHost>>();
             RawHttpHandlers = new List<Func<IHttpRequest, IHttpHandler>> {
                  HttpHandlerFactory.ReturnRequestInfo,
                  MiniProfilerHandler.MatchesRequest,
@@ -189,6 +191,8 @@ namespace ServiceStack
 
         public string ServiceName { get; set; }
 
+        public IAppSettings AppSettings { get; set; }
+
         public ServiceMetadata Metadata { get; set; }
 
         public ServiceController ServiceController { get; set; }
@@ -239,6 +243,8 @@ namespace ServiceStack
         public List<HandleUncaughtExceptionDelegate> UncaughtExceptionHandlers { get; set; }
 
         public List<Action<IAppHost>> AfterInitCallbacks { get; set; }
+
+        public List<Action<IAppHost>> OnDisposeCallbacks { get; set; }
 
         public List<Func<IHttpRequest, IHttpHandler>> RawHttpHandlers { get; set; }
 
@@ -427,6 +433,9 @@ namespace ServiceStack
 
             AfterPluginsLoaded(specifiedContentType);
 
+            if (!Container.Exists<IAppSettings>())
+                Container.Register(AppSettings);
+
             if (!Container.Exists<ICacheClient>())
             {
                 if (Container.Exists<IRedisClientsManager>())
@@ -585,7 +594,7 @@ namespace ServiceStack
             return new ServiceRunner<TRequest>(this, actionContext);
         }
 
-        public virtual string ResolveLocalizedString(string text)
+        public virtual string ResolveLocalizedString(string text, IRequest request)
         {
             return text;
         }
@@ -703,6 +712,11 @@ namespace ServiceStack
 
         public virtual void Dispose()
         {
+            foreach (var callback in OnDisposeCallbacks)
+            {
+                callback(this);
+            }
+
             if (Container != null)
             {
                 Container.Dispose();

@@ -13,6 +13,8 @@ namespace ServiceStack.RabbitMq
         protected readonly RabbitMqMessageFactory msgFactory;
         public int RetryCount { get; set; }
         public Action OnPublishedCallback { get; set; }
+        public Action<string, IBasicProperties, IMessage> PublishMessageFilter { get; set; }
+        public Action<string, BasicGetResult> GetMessageFilter { get; set; }
 
         private IConnection connection;
         public IConnection Connection
@@ -81,6 +83,11 @@ namespace ServiceStack.RabbitMq
             Publish(queueName, MessageFactory.Create(requestDto));
         }
 
+        public void SendAllOneWay<TResponse>(IEnumerable<IReturn<TResponse>> requests)
+        {
+            throw new NotImplementedException();
+        }
+
         public void Publish(string queueName, IMessage message, string exchange)
         {
             using (__requestAccess())
@@ -88,6 +95,11 @@ namespace ServiceStack.RabbitMq
                 var props = Channel.CreateBasicProperties();
                 props.SetPersistent(true);
                 props.PopulateFromMessage(message);
+
+                if (PublishMessageFilter != null)
+                {
+                    PublishMessageFilter(queueName, props, message);
+                }
 
                 var messageBytes = message.Body.ToJson().ToUtf8Bytes();
 
@@ -108,21 +120,39 @@ namespace ServiceStack.RabbitMq
         {
             try
             {
-                if (!Queues.Contains(routingKey))
+                // In case of server named queues (client declared queue with channel.declare()), assume queue already exists 
+                //(redeclaration would result in error anyway since queue was marked as exclusive) and publish to default exchange
+                if (routingKey.IsServerNamedQueue()) 
                 {
-                    Channel.RegisterQueueByName(routingKey);
-                    Queues = new HashSet<string>(Queues) { routingKey };
+                    Channel.BasicPublish("", routingKey, basicProperties, body);
+                }
+                else
+                {
+                    if (!Queues.Contains(routingKey))
+                    {
+                        Channel.RegisterQueueByName(routingKey);
+                        Queues = new HashSet<string>(Queues) { routingKey };
+                    }
+
+                    Channel.BasicPublish(exchange, routingKey, basicProperties, body);
                 }
 
-                Channel.BasicPublish(exchange, routingKey, basicProperties, body);
             }
             catch (OperationInterruptedException ex)
             {
                 if (ex.Is404())
                 {
-                    Channel.RegisterExchangeByName(exchange);
+                    // In case of server named queues (client declared queue with channel.declare()), assume queue already exists (redeclaration would result in error anyway since queue was marked as exclusive) and publish to default exchange
+                    if (routingKey.IsServerNamedQueue())
+                    {
+                        Channel.BasicPublish("", routingKey, basicProperties, body);
+                    }
+                    else
+                    {
+                        Channel.RegisterExchangeByName(exchange);
 
-                    Channel.BasicPublish(exchange, routingKey, basicProperties, body);
+                        Channel.BasicPublish(exchange, routingKey, basicProperties, body);
+                    }
                 }
                 throw;
             }
@@ -138,7 +168,14 @@ namespace ServiceStack.RabbitMq
                     Queues = new HashSet<string>(Queues) { queueName };
                 }
 
-                return Channel.BasicGet(queueName, noAck: noAck);
+                var basicMsg = Channel.BasicGet(queueName, noAck: noAck);
+
+                if (GetMessageFilter != null)
+                {
+                    GetMessageFilter(queueName, basicMsg);
+                }
+
+                return basicMsg;
             }
             catch (OperationInterruptedException ex)
             {

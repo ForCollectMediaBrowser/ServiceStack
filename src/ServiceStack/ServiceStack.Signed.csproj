@@ -100,8 +100,16 @@
     <Compile Include="AddHeaderAttribute.cs" />
     <Compile Include="AppHostHttpListenerSmartPoolBase.cs" />
     <Compile Include="AppSelfHostBase.cs" />
+    <Compile Include="AspNet\ServiceStackPage.cs">
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Configuration\EnvironmentVariableSettings.cs" />
+    <Compile Include="Configuration\MultiAppSettings.cs" />
+    <Compile Include="NativeTypes\VbNet\VbNetGenerator.cs" />
+    <Compile Include="ServiceStackProvider.cs" />
     <Compile Include="AsyncExtensions.cs" />
     <Compile Include="Auth\AspNetWindowsAuthProvider.cs" />
+    <Compile Include="Auth\AuthEvents.cs" />
     <Compile Include="Auth\OdnoklassnikiAuthProvider.cs" />
     <Compile Include="Auth\AuthMetadataProvider.cs" />
     <Compile Include="Auth\VkAuthProvider.cs" />
@@ -113,6 +121,7 @@
     <Compile Include="CompressedResult.cs" />
     <Compile Include="Configuration\TextFileSettings.cs" />
     <Compile Include="NativeTypesFeature.cs" />
+    <Compile Include="NativeTypes\FSharp\FSharpGenerator.cs" />
     <Compile Include="NativeTypes\NativeTypesMetadata.cs">
       <SubType>Code</SubType>
     </Compile>
@@ -563,6 +572,8 @@
     <Compile Include="Metadata\IndexOperationsControl.cs" />
     <Compile Include="Metadata\XsdTypeNames.cs" />
     <Compile Include="Metadata\XsdTypes.cs" />
+    <Compile Include="WebSudoFeature.cs" />
+    <Compile Include="WebSudoRequiredAttribute.cs" />
     <Compile Include="XsdUtils.cs" />
     <Compile Include="Metadata\ListTemplate.cs" />
     <Compile Include="IAppHost.cs" />

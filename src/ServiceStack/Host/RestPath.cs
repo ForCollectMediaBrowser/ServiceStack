@@ -337,7 +337,7 @@ namespace ServiceStack.Host
                         continue;
                     }
 
-                    if (withPathInfoParts[pathIx] != literalToMatch) return false;
+                    if (withPathInfoParts.Length <= pathIx || withPathInfoParts[pathIx] != literalToMatch) return false;
                     pathIx++;
                 }
             }
@@ -472,6 +472,11 @@ namespace ServiceStack.Host
             }
 
             return this.typeDeserializer.PopulateFromMap(fromInstance, requestKeyValuesMap, HostContext.Config.IgnoreWarningsOnPropertyNames);
+        }
+
+        public bool IsVariable(string name)
+        {
+            return name != null && variablesNames.Any(name.EqualsIgnoreCase);
         }
 
         public override int GetHashCode()

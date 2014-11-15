@@ -27,6 +27,7 @@ namespace ServiceStack.Auth
 
         private readonly IDbConnectionFactory dbFactory;
         private readonly IHashProvider passwordHasher;
+        private bool hasInitSchema;
 
         public bool UseDistinctRoleTables { get; set; }
 
@@ -41,6 +42,7 @@ namespace ServiceStack.Auth
 
         public void InitSchema()
         {
+            hasInitSchema = true;
             using (var db = dbFactory.Open())
             {
                 db.CreateTable<TUserAuth>();
@@ -70,17 +72,10 @@ namespace ServiceStack.Auth
         private void ValidateNewUser(IUserAuth newUser)
         {
             if (newUser.UserName.IsNullOrEmpty() && newUser.Email.IsNullOrEmpty())
-            {
-                throw new ArgumentNullException("UserName or Email is required");
-            }
+                throw new ArgumentNullException(ErrorMessages.UsernameOrEmailRequired);
 
-            if (!newUser.UserName.IsNullOrEmpty())
-            {
-                if (!ValidUserNameRegEx.IsMatch(newUser.UserName))
-                {
-                    throw new ArgumentException("UserName contains invalid characters", "UserName");
-                }
-            }
+            if (!newUser.UserName.IsNullOrEmpty() && !ValidUserNameRegEx.IsMatch(newUser.UserName))
+                throw new ArgumentException(ErrorMessages.IllegalUsername, "UserName");
         }
 
         public IUserAuth CreateUserAuth(IUserAuth newUser, string password)
@@ -187,6 +182,14 @@ namespace ServiceStack.Auth
 
         public IUserAuth GetUserAuthByUserName(string userNameOrEmail)
         {
+            if (!hasInitSchema)
+            {
+                using (var db = dbFactory.Open())
+                {
+                    hasInitSchema = db.TableExists<TUserAuth>();
+                }
+                if (!hasInitSchema) throw new Exception("OrmLiteAuthRepository Db tables have not been initialized. Try calling 'InitSchema()' in your AppHost Configure method.");
+            }
             using (var db = dbFactory.Open())
             {
                 return GetUserAuthByUserName(db, userNameOrEmail);

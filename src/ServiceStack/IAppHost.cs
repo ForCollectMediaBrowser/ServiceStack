@@ -95,7 +95,12 @@ namespace ServiceStack
         /// <summary>
         /// Provide callbacks to be fired after the AppHost has finished initializing
         /// </summary>
-        List<Action<IAppHost>> AfterInitCallbacks { get; set; }
+        List<Action<IAppHost>> AfterInitCallbacks { get; }
+
+        /// <summary>
+        /// Provide callbacks to be fired when AppHost is being disposed
+        /// </summary>
+        List<Action<IAppHost>> OnDisposeCallbacks { get; }
 
         /// <summary>
         /// Skip the ServiceStack Request Pipeline and process the returned IHttpHandler instead
@@ -126,6 +131,11 @@ namespace ServiceStack
         /// The AppHost config
         /// </summary>
         HostConfig Config { get; }
+
+        /// <summary>
+        /// The AppHost AppSettings. Defaults to App or Web.config appSettings.
+        /// </summary>
+        IAppSettings AppSettings { get; }
 
         /// <summary>
         /// Register an Adhoc web service on Startup
@@ -159,8 +169,9 @@ namespace ServiceStack
 
         /// <summary>
         /// Resolve localized text, returns itself by default.
+        /// The Request is provided when exists.
         /// </summary>
-        string ResolveLocalizedString(string text);
+        string ResolveLocalizedString(string text, IRequest request);
     }
 
     public interface IHasAppHost

@@ -113,6 +113,10 @@ namespace ServiceStack.Auth
                     }
                 };
 
+                session.ReferrerUrl = GetReferrerUrl(authService, session, request);
+
+                var response = OnAuthenticated(authService, session, tokens, new Dictionary<string, string>());
+
                 if (session.Roles == null)
                     session.Roles = new List<string>();
 
@@ -122,9 +126,8 @@ namespace ServiceStack.Auth
                         session.Roles.AddIfNotExists(role);
                 }
 
-                session.ReferrerUrl = GetReferrerUrl(authService, session, request);
-
-                var response = OnAuthenticated(authService, session, tokens, new Dictionary<string, string>());
+                authService.SaveSession(session, SessionExpiry);
+                
                 if (response != null)
                     return response;
 
@@ -137,7 +140,7 @@ namespace ServiceStack.Auth
                 };
             }
 
-            throw HttpError.Unauthorized("Windows Auth failed");
+            throw HttpError.Unauthorized(ErrorMessages.WindowsAuthFailed);
         }
 
         public static void AuthenticateIfWindowsAuth(IRequest req, IResponse res)

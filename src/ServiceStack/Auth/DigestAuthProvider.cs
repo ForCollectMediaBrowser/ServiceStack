@@ -8,6 +8,7 @@ using ServiceStack.Web;
 
 namespace ServiceStack.Auth
 {
+    //DigestAuth Info: http://www.ntu.edu.sg/home/ehchua/programming/webprogramming/HTTP_Authentication.html
     public class DigestAuthProvider : AuthProvider, IAuthWithRequest
     {
         public static string Name = AuthenticateService.DigestProvider;
@@ -89,12 +90,13 @@ namespace ServiceStack.Auth
                     return response;
 
                 return new AuthenticateResponse {
+                    UserId = session.UserAuthId,
                     UserName = userName,
                     SessionId = session.Id,
                 };
             }
 
-            throw HttpError.Unauthorized("Invalid UserName or Password");
+            throw HttpError.Unauthorized(ErrorMessages.InvalidUsernameOrPassword);
         }
 
         public override IHttpResult OnAuthenticated(IServiceBase authService, IAuthSession session, IAuthTokens tokens, Dictionary<string, string> authInfo)
@@ -131,6 +133,7 @@ namespace ServiceStack.Auth
             try
             {
                 session.OnAuthenticated(authService, session, tokens, authInfo);
+                AuthEvents.OnAuthenticated(authService.Request, session, authService, tokens, authInfo);
             }
             finally
             {

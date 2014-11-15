@@ -106,8 +106,17 @@
     
     <h3>Custom Credentials Auth</h3>
     <form action="/auth/credentials">
-        <input type="text" name="Username"/>
-        <input type="text" name="Password"/>
+        <input type="text" name="Username" value="demis.bellot@gmail.com"/>
+        <input type="text" name="Password" value="test"/>
+        <input type="submit"/>
+    </form>
+    
+    <h3>Register New User</h3>
+    <form action="/register" method="POST">
+        <input type="text" name="Username"  placeholder="UserName"  value="NewUser"/>
+        <input type="text" name="Password"  placeholder="Password"  value="test"/>
+        <input type="text" name="FirstName" placeholder="FirstName" value="New"/>
+        <input type="text" name="LastName"  placeholder="LastName"  value="User"/>
         <input type="submit"/>
     </form>
     

@@ -8,6 +8,7 @@ using System.Text;
 using System.Web;
 using ServiceStack.Auth;
 using ServiceStack.Caching;
+using ServiceStack.Configuration;
 using ServiceStack.Data;
 using ServiceStack.Formats;
 using ServiceStack.Html;
@@ -365,6 +366,11 @@ namespace ServiceStack.Razor
             set { appHost = value; }
         }
 
+        public IAppSettings AppSettings
+        {
+            get { return AppHost.AppSettings; }
+        }
+
         public virtual T Get<T>()
         {
             return this.AppHost.TryResolve<T>();
@@ -384,6 +390,15 @@ namespace ServiceStack.Razor
                 requiresContext.Request = this.Request;
             }
             return service;
+        }
+
+        public virtual object ExecuteService<T>(Func<T, object> fn)
+        {
+            var service = ResolveService<T>();
+            using (service as IDisposable)
+            {
+                return fn(service);
+            }
         }
 
         public bool IsError

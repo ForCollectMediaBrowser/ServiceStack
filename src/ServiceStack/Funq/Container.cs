@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using ServiceStack;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace Funq
@@ -397,6 +398,23 @@ namespace Funq
             while (!container.TryGetServiceEntry(key, out entry) && container.parent != null)
             {
                 container = container.parent;
+            }
+
+            if (entry == null)
+            {
+                var genericDef = typeof(TService).FirstGenericTypeDefinition();
+                if (genericDef != null && genericDef.Name.StartsWith("Func`")) //Lazy Dependencies
+                {
+                    var argTypes = typeof(TService).GetTypeGenericArguments();
+                    var lazyResolver = GetLazyResolver(argTypes);
+
+                    return new ServiceEntry<TService, TFunc>(
+                        (TFunc)(object)(Func<Container, TService>)(c => (TService)lazyResolver))
+                    {
+                        Owner = DefaultOwner,
+                        Container = this,
+                    };
+                }
             }
 
             if (entry != null)

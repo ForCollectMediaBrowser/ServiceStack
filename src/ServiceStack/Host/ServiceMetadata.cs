@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using ServiceStack.DataAnnotations;
+using ServiceStack.NativeTypes;
+using ServiceStack.NativeTypes.CSharp;
 using ServiceStack.Text;
 using ServiceStack.Web;
 
@@ -129,7 +131,19 @@ namespace ServiceStack.Host
         public Type GetOperationType(string operationTypeName)
         {
             Operation operation;
-            OperationNamesMap.TryGetValue(operationTypeName.ToLower(), out operation);
+            var opName = operationTypeName.ToLower();
+            if (!OperationNamesMap.TryGetValue(opName, out operation))
+            {
+                var arrayPos = opName.LastIndexOf('[');
+                if (arrayPos >= 0)
+                {
+                    opName = opName.Substring(0, arrayPos);
+                    OperationNamesMap.TryGetValue(opName, out operation);
+                    return operation != null
+                        ? operation.RequestType.MakeArrayType()
+                        : null;
+                }
+            }
             return operation != null ? operation.RequestType : null;
         }
 
@@ -290,6 +304,114 @@ namespace ServiceStack.Host
                     : RequestAttributes.External);
         }
 
+        public List<MetadataType> GetMetadataTypesForOperation(IRequest httpReq, Operation op)
+        {
+            var typeMetadata = HostContext.TryResolve<INativeTypesMetadata>();
+
+            var metadataTypes = typeMetadata != null
+                ? typeMetadata.GetMetadataTypes(httpReq)
+                : new MetadataTypesGenerator(this, new NativeTypesFeature().MetadataTypesConfig)
+                    .GetMetadataTypes(httpReq);
+
+            var types = new List<MetadataType>();
+
+            var reqType = FindMetadataType(metadataTypes, op.RequestType);
+            if (reqType != null)
+            {
+                types.Add(reqType);
+
+                AddReferencedTypes(reqType, metadataTypes, types);
+            }
+
+            var resType = FindMetadataType(metadataTypes, op.ResponseType);
+            if (resType != null)
+            {
+                types.Add(resType);
+
+                AddReferencedTypes(resType, metadataTypes, types);
+            }
+
+            var generator = new CSharpGenerator(new NativeTypesFeature().MetadataTypesConfig);
+            types.Each(x =>
+            {
+                x.DisplayType = x.DisplayType ?? generator.Type(x.Name, x.GenericArgs);
+                x.Properties.Each(p =>
+                    p.DisplayType = p.DisplayType ?? generator.Type(p.Type, p.GenericArgs));
+            });
+
+            return types;
+        }
+
+        private static void AddReferencedTypes(MetadataType metadataType, MetadataTypes metadataTypes, List<MetadataType> types)
+        {
+            if (metadataType.Inherits != null)
+            {
+                var type = FindMetadataType(metadataTypes, metadataType.Inherits.Name, metadataType.Inherits.Namespace);
+                if (type != null && !types.Contains(type))
+                    types.Add(type);
+
+                if (!metadataType.Inherits.GenericArgs.IsEmpty())
+                {
+                    foreach (var arg in metadataType.Inherits.GenericArgs)
+                    {
+                        type = FindMetadataType(metadataTypes, arg);
+                        if (type != null && !types.Contains(type))
+                            types.Add(type);
+                    }
+                }
+            }
+
+            if (metadataType.Properties != null)
+            {
+                foreach (var p in metadataType.Properties)
+                {
+                    var type = FindMetadataType(metadataTypes, p.Type, p.TypeNamespace);
+                    if (type != null && !types.Contains(type))
+                        types.Add(type);
+
+                    if (!p.GenericArgs.IsEmpty())
+                    {
+                        foreach (var arg in p.GenericArgs)
+                        {
+                            type = FindMetadataType(metadataTypes, arg);
+                            if (type != null && !types.Contains(type))
+                                types.Add(type);     
+                        }
+                    }
+                    else if (p.IsArray())
+                    {
+                        var elType = p.Type.SplitOnFirst('[')[0];
+                        type = FindMetadataType(metadataTypes, elType);
+                        if (type != null && !types.Contains(type))
+                            types.Add(type);
+                    }
+                }
+            }
+        }
+
+        static MetadataType FindMetadataType(MetadataTypes metadataTypes, Type type)
+        {
+            return type == null ? null : FindMetadataType(metadataTypes, type.Name, type.Namespace);
+        }
+
+        static MetadataType FindMetadataType(MetadataTypes metadataTypes, string name, string @namespace = null)
+        {
+            if (@namespace != null && @namespace.StartsWith("System"))
+                return null;
+
+            var reqType = metadataTypes.Operations.FirstOrDefault(x => x.Request.Name == name);
+            if (reqType != null)
+                return reqType.Request;
+
+            var resType = metadataTypes.Operations
+                .FirstOrDefault(x => x.Response != null && x.Response.Name == name);
+
+            if (resType != null)
+                return resType.Response;
+
+            return metadataTypes.Types.FirstOrDefault(x => x.Name == name
+                && (@namespace == null || x.Namespace == @namespace));
+        }
     }
 
     public class Operation
@@ -319,7 +441,7 @@ namespace ServiceStack.Host
         public List<string> RestrictTo { get; set; }
         public List<string> VisibleTo { get; set; }
         public List<string> Actions { get; set; }
-        public Dictionary<string, string> Routes { get; set; }
+        public List<string> Routes { get; set; }
     }
 
     public class XsdMetadata
@@ -398,7 +520,7 @@ namespace ServiceStack.Host
                 ResponseName = operation.IsOneWay ? null : operation.ResponseType.GetOperationName(),
                 ServiceName = operation.ServiceType.GetOperationName(),
                 Actions = operation.Actions,
-                Routes = operation.Routes.ToDictionary(x => x.Path.PairWith(x.AllowedVerbs)),
+                Routes = operation.Routes.Map(x => x.Path),
             };
             
             if (operation.RestrictTo != null)
@@ -437,5 +559,60 @@ namespace ServiceStack.Host
         }
     }
 
+    public static class MetadataTypeExtensions
+    {
+        public static string GetParamType(this MetadataPropertyType prop, MetadataType type, Operation op)
+        {
+            if (prop.ParamType != null)
+                return prop.ParamType;
 
+            var isRequest = type.Name == op.RequestType.Name;
+
+            return !isRequest ? "body" : GetRequestParamType(op, prop.Name);
+        }
+
+        public static string GetParamType(this ApiMemberAttribute attr, Type type, string verb)
+        {
+            if (attr.ParameterType != null)
+                return attr.ParameterType;
+
+            var op = HostContext.Metadata.GetOperation(type);
+            var isRequestType = op != null;
+
+            var defaultType = verb == HttpMethods.Post || verb == HttpMethods.Put
+                ? "body"
+                : "query";
+
+            return !isRequestType ? defaultType : GetRequestParamType(op, attr.Name, defaultType);
+        }
+
+        private static string GetRequestParamType(Operation op, string name, string defaultType="body")
+        {
+            if (op.Routes.Any(x => x.IsVariable(name)))
+                return "path";
+
+            return !op.Routes.Any(x => x.Verbs.Contains(HttpMethods.Post) || x.Verbs.Contains(HttpMethods.Put))
+                       ? "query"
+                       : defaultType;
+        }
+
+        public static HashSet<string> CollectionTypes = new HashSet<string> {
+            "List`1",
+            "HashSet`1",
+            "Dictionary`2",
+            "Queue`1",
+            "Stack`1",
+        };
+
+        public static bool IsCollection(this MetadataPropertyType prop)
+        {
+            return CollectionTypes.Contains(prop.Type)
+                || IsArray(prop);
+        }
+
+        public static bool IsArray(this MetadataPropertyType prop)
+        {
+            return prop.Type.SplitOnFirst('[').Length > 1;
+        }
+    }
 }

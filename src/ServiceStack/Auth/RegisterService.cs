@@ -58,6 +58,8 @@ namespace ServiceStack.Auth
 
         public IValidator<Register> RegistrationValidator { get; set; }
 
+        public IAuthEvents AuthEvents { get; set; }
+
         /// <summary>
         /// Update an existing registraiton
         /// </summary>
@@ -105,6 +107,7 @@ namespace ServiceStack.Auth
                 {
                     var authResponse = authService.Post(
                         new Authenticate {
+                            provider = CredentialsAuthProvider.Name,
                             UserName = request.UserName ?? request.Email,
                             Password = request.Password,
                             Continue = request.Continue
@@ -131,6 +134,8 @@ namespace ServiceStack.Auth
             {
                 session = this.GetSession();
                 session.OnRegistered(this);
+                if (AuthEvents != null)
+                    AuthEvents.OnRegistered(this.Request, session, this);
             }
 
             if (response == null)
@@ -187,7 +192,7 @@ namespace ServiceStack.Auth
 
             var existingUser = userAuthRepo.GetUserAuth(session, null);
             if (existingUser == null)
-                throw HttpError.NotFound("User does not exist");
+                throw HttpError.NotFound(ErrorMessages.UserNotExists);
 
             var newUserAuth = ToUserAuth(request);
             userAuthRepo.UpdateUserAuth(existingUser, newUserAuth, request.Password);

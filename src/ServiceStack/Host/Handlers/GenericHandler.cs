@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using ServiceStack.MiniProfiler;
 using ServiceStack.Web;
@@ -13,8 +15,10 @@ namespace ServiceStack.Host.Handlers
 			this.ContentTypeAttribute = ContentFormat.GetEndpointAttributes(contentType);
 			this.HandlerAttributes = handlerAttributes;
 			this.format = format;
+		    this.appHost = HostContext.AppHost;
 		}
 
+	    private ServiceStackHost appHost;
         private readonly Feature format;
 		public string HandlerContentType { get; set; }
 
@@ -35,10 +39,11 @@ namespace ServiceStack.Host.Handlers
 
 		public object GetRequest(IRequest httpReq, string operationName)
 		{
-			var requestType = GetOperationType(operationName);
-			AssertOperationExists(operationName, requestType);
+            var requestType = GetOperationType(operationName);
 
-			using (Profiler.Current.Step("Deserialize Request"))
+            AssertOperationExists(operationName, requestType);
+
+            using (Profiler.Current.Step("Deserialize Request"))
 			{
 				var requestDto = GetCustomRequestFromBinder(httpReq, requestType);
 				return requestDto ?? DeserializeHttpRequest(requestType, httpReq, HandlerContentType)
@@ -51,11 +56,10 @@ namespace ServiceStack.Host.Handlers
             return true;
         }
 
-        public override Task ProcessRequestAsync(IRequest httpReq, IResponse httpRes, string operationName)
+	    public override Task ProcessRequestAsync(IRequest httpReq, IResponse httpRes, string operationName)
         {
 			try
             {
-                var appHost = HostContext.AppHost;
                 appHost.AssertFeatures(format);
 
                 if (appHost.ApplyPreRequestFilters(httpReq, httpRes))
@@ -66,7 +70,8 @@ namespace ServiceStack.Host.Handlers
                 var doJsonp = HostContext.Config.AllowJsonpRequests
                               && !string.IsNullOrEmpty(callback);
 
-                var request = CreateRequest(httpReq, operationName);
+                var request = httpReq.Dto = CreateRequest(httpReq, operationName);
+
                 if (appHost.ApplyRequestFilters(httpReq, httpRes, request))
                     return EmptyTask;
 

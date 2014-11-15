@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using ServiceStack.Configuration;
@@ -40,7 +41,8 @@ namespace ServiceStack.Auth
             IUserAuth userAuth;
             if (authRepo.TryAuthenticate(userName, password, out userAuth))
             {
-                AssertNotLocked(userAuth);
+                if (IsAccountLocked(authRepo, userAuth))
+                    throw new AuthenticationException("This account has been locked");
 
                 var holdSessionId = session.Id;
                 session.PopulateWith(userAuth); //overwrites session.Id
@@ -103,13 +105,14 @@ namespace ServiceStack.Auth
 
                 return new AuthenticateResponse
                 {
+                    UserId = session.UserAuthId,
                     UserName = userName,
                     SessionId = session.Id,
                     ReferrerUrl = referrerUrl
                 };
             }
 
-            throw HttpError.Unauthorized("Invalid UserName or Password");
+            throw HttpError.Unauthorized(ErrorMessages.InvalidUsernameOrPassword);
         }
 
         public override IHttpResult OnAuthenticated(IServiceBase authService, IAuthSession session, IAuthTokens tokens, Dictionary<string, string> authInfo)
@@ -159,6 +162,7 @@ namespace ServiceStack.Auth
             {
                 session.IsAuthenticated = true;
                 session.OnAuthenticated(authService, session, tokens, authInfo);
+                AuthEvents.OnAuthenticated(authService.Request, session, authService, tokens, authInfo);
             }
             finally
             {

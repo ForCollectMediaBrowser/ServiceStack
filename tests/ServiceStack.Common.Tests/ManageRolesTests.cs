@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using NUnit.Framework;
 using ServiceStack.Auth;
+using ServiceStack.Configuration;
 using ServiceStack.Data;
 using ServiceStack.Host;
 using ServiceStack.OrmLite;
@@ -35,7 +37,6 @@ namespace ServiceStack.Common.Tests
             {
                 ConfigureContainer = container =>
                 {
-
                     container.Register<IDbConnectionFactory>(c =>
                         new OrmLiteConnectionFactory(":memory:", SqliteDialect.Provider));
 
@@ -50,6 +51,8 @@ namespace ServiceStack.Common.Tests
                 {
                     var register = CreateNewUserRegistration();
                     var req = new BasicRequest(register);
+                    req.QueryString["authSecret"] = appHost.Config.AdminAuthSecret = "allow";
+
                     var response = (RegisterResponse)appHost.ExecuteService(register, req);
                     var userAuth = db.SingleById<UserAuth>(response.UserId);
 
@@ -57,7 +60,7 @@ namespace ServiceStack.Common.Tests
                     {
                         UserName = userAuth.UserName,
                         Roles = { "TestRole" },
-                        Permissions = {"TestPermission"},
+                        Permissions = { "TestPermission" },
                     }, req);
                     Assert.That(assignResponse.AllRoles[0], Is.EqualTo("TestRole"));
                     Assert.That(assignResponse.AllPermissions[0], Is.EqualTo("TestPermission"));
@@ -103,6 +106,8 @@ namespace ServiceStack.Common.Tests
                 {
                     var register = CreateNewUserRegistration();
                     var req = new BasicRequest(register);
+                    req.QueryString["authSecret"] = appHost.Config.AdminAuthSecret = "allow";
+
                     var response = (RegisterResponse)appHost.ExecuteService(register, req);
                     var userAuth = db.SingleById<UserAuth>(response.UserId);
 

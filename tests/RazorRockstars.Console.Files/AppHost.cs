@@ -249,7 +249,7 @@ namespace RazorRockstars.Console.Files
 
         public void Any(PostRawToChannel request)
         {
-            var sub = ServerEvents.GetSubscription(request.From);
+            var sub = ServerEvents.GetSubscriptionInfo(request.From);
             if (sub == null)
                 throw HttpError.NotFound("Subscription {0} does not exist".Fmt(request.From));
 
@@ -261,6 +261,20 @@ namespace RazorRockstars.Console.Files
             {
                 ServerEvents.NotifyChannel(request.Channel, request.Selector, request.Message);
             }
+        }
+    }
+
+    [Route("/Content/hello/{Name*}")]
+    public class TestWildcardRazorPage
+    {
+        public string Name { get; set; }
+    }
+
+    public class IssueServices : Service
+    {
+        public object Get(TestWildcardRazorPage request)
+        {
+            return request;
         }
     }
 }

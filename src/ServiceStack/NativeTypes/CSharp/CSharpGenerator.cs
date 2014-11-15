@@ -1,15 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Text;
+using ServiceStack.Host;
+using ServiceStack.Web;
 
 namespace ServiceStack.NativeTypes.CSharp
 {
     public class CSharpGenerator
     {
-        private const int Version = 1;
-
         readonly MetadataTypesConfig Config;
 
         public CSharpGenerator(MetadataTypesConfig config)
@@ -24,33 +25,37 @@ namespace ServiceStack.NativeTypes.CSharp
             public bool IsResponse { get; set; }
             public bool IsOperation { get { return IsRequest || IsResponse; } }
             public bool IsType { get; set; }
+            public bool IsNestedType { get; set; }
         }
 
-        public string GetCode(MetadataTypes metadata)
+        public string GetCode(MetadataTypes metadata, IRequest request)
         {
             var namespaces = new HashSet<string>();
             Config.DefaultNamespaces.Each(x => namespaces.Add(x));
             metadata.Types.Each(x => namespaces.Add(x.Namespace));
             metadata.Operations.Each(x => namespaces.Add(x.Request.Namespace));
 
+            Func<string,string> defaultValue = k =>
+                request.QueryString[k].IsNullOrEmpty() ? "//" : "";
+
             var sb = new StringBuilderWrapper(new StringBuilder());
             sb.AppendLine("/* Options:");
-            sb.AppendLine("Version: {0}".Fmt(Version));
+            sb.AppendLine("Date: {0}".Fmt(DateTime.Now.ToString("s").Replace("T"," ")));
+            sb.AppendLine("Version: {0}".Fmt(metadata.Version));
             sb.AppendLine("BaseUrl: {0}".Fmt(Config.BaseUrl));
             sb.AppendLine();
-            sb.AppendLine("ServerVersion: {0}".Fmt(metadata.Version));
-            sb.AppendLine("MakePartial: {0}".Fmt(Config.MakePartial));
-            sb.AppendLine("MakeVirtual: {0}".Fmt(Config.MakeVirtual));
-            sb.AppendLine("MakeDataContractsExtensible: {0}".Fmt(Config.MakeDataContractsExtensible));
-            sb.AppendLine("AddReturnMarker: {0}".Fmt(Config.AddReturnMarker));
-            sb.AppendLine("AddDescriptionAsComments: {0}".Fmt(Config.AddDescriptionAsComments));
-            sb.AppendLine("AddDataContractAttributes: {0}".Fmt(Config.AddDataContractAttributes));
-            sb.AppendLine("AddIndexesToDataMembers: {0}".Fmt(Config.AddIndexesToDataMembers));
-            sb.AppendLine("AddResponseStatus: {0}".Fmt(Config.AddResponseStatus));
-            sb.AppendLine("AddImplicitVersion: {0}".Fmt(Config.AddImplicitVersion));
-            sb.AppendLine("InitializeCollections: {0}".Fmt(Config.InitializeCollections));
-            sb.AppendLine("AddDefaultXmlNamespace: {0}".Fmt(Config.AddDefaultXmlNamespace));
-            //sb.AppendLine("DefaultNamespaces: {0}".Fmt(Config.DefaultNamespaces.ToArray().Join(", ")));
+            sb.AppendLine("{0}MakePartial: {1}".Fmt(defaultValue("MakePartial"), Config.MakePartial));
+            sb.AppendLine("{0}MakeVirtual: {1}".Fmt(defaultValue("MakeVirtual"), Config.MakeVirtual));
+            sb.AppendLine("{0}MakeDataContractsExtensible: {1}".Fmt(defaultValue("MakeDataContractsExtensible"), Config.MakeDataContractsExtensible));
+            sb.AppendLine("{0}AddReturnMarker: {1}".Fmt(defaultValue("AddReturnMarker"), Config.AddReturnMarker));
+            sb.AppendLine("{0}AddDescriptionAsComments: {1}".Fmt(defaultValue("AddDescriptionAsComments"), Config.AddDescriptionAsComments));
+            sb.AppendLine("{0}AddDataContractAttributes: {1}".Fmt(defaultValue("AddDataContractAttributes"), Config.AddDataContractAttributes));
+            sb.AppendLine("{0}AddIndexesToDataMembers: {1}".Fmt(defaultValue("AddIndexesToDataMembers"), Config.AddIndexesToDataMembers));
+            sb.AppendLine("{0}AddResponseStatus: {1}".Fmt(defaultValue("AddResponseStatus"), Config.AddResponseStatus));
+            sb.AppendLine("{0}AddImplicitVersion: {1}".Fmt(defaultValue("AddImplicitVersion"), Config.AddImplicitVersion));
+            sb.AppendLine("{0}InitializeCollections: {1}".Fmt(defaultValue("InitializeCollections"), Config.InitializeCollections));
+            sb.AppendLine("{0}AddDefaultXmlNamespace: {1}".Fmt(defaultValue("AddDefaultXmlNamespace"), Config.AddDefaultXmlNamespace));
+            //sb.AppendLine("{0}DefaultNamespaces: {1}".Fmt(defaultValue("DefaultNamespaces"), Config.DefaultNamespaces.ToArray().Join(", ")));
             sb.AppendLine("*/");
             sb.AppendLine();
 
@@ -102,24 +107,24 @@ namespace ServiceStack.NativeTypes.CSharp
                             response = operation.Response;
                         }
 
-                        lastNS = AppendType(ref sb, type, lastNS,
+                        lastNS = AppendType(ref sb, type, lastNS, allTypes, 
                             new CreateTypeOptions
                             {
                                 ImplementsFn = () =>
-                                {
-                                    if (!Config.AddReturnMarker
-                                        && !type.ReturnVoidMarker
-                                        && type.ReturnMarkerTypeName == null)
-                                        return null;
+                                    {
+                                        if (!Config.AddReturnMarker
+                                            && !type.ReturnVoidMarker
+                                            && type.ReturnMarkerTypeName == null)
+                                            return null;
 
-                                    if (type.ReturnVoidMarker)
-                                        return "IReturnVoid";
-                                    if (type.ReturnMarkerTypeName != null)
-                                        return Type("IReturn`1", new[] { Type(type.ReturnMarkerTypeName) });
-                                    return response != null
-                                        ? Type("IReturn`1", new[] { Type(type.Name, type.GenericArgs) })
-                                        : null;
-                                },
+                                        if (type.ReturnVoidMarker)
+                                            return "IReturnVoid";
+                                        if (type.ReturnMarkerTypeName != null)
+                                            return Type("IReturn`1", new[] { Type(type.ReturnMarkerTypeName) });
+                                        return response != null
+                                                    ? Type("IReturn`1", new[] { Type(type.Name, type.GenericArgs) })
+                                                    : null;
+                                    },
                                 IsRequest = true,
                             });
 
@@ -131,18 +136,15 @@ namespace ServiceStack.NativeTypes.CSharp
                     if (!existingOps.Contains(fullTypeName)
                         && !Config.IgnoreTypesInNamespaces.Contains(type.Namespace))
                     {
-                        lastNS = AppendType(ref sb, type, lastNS,
-                            new CreateTypeOptions
-                            {
-                                IsResponse = true,
-                            });
+                        lastNS = AppendType(ref sb, type, lastNS, allTypes, 
+                            new CreateTypeOptions { IsResponse = true, });
 
                         existingOps.Add(fullTypeName);
                     }
                 }
                 else if (types.Contains(type) && !existingOps.Contains(fullTypeName))
                 {
-                    lastNS = AppendType(ref sb, type, lastNS,
+                    lastNS = AppendType(ref sb, type, lastNS, allTypes, 
                         new CreateTypeOptions { IsType = true });
                 }
             }
@@ -154,10 +156,11 @@ namespace ServiceStack.NativeTypes.CSharp
             return sb.ToString();
         }
 
-        private string AppendType(ref StringBuilderWrapper sb, MetadataType type, string lastNS,
-            CreateTypeOptions options)
+        private string AppendType(ref StringBuilderWrapper sb, MetadataType type, string lastNS, List<MetadataType> allTypes, CreateTypeOptions options)
         {
-            if (type == null || (type.Namespace != null && type.Namespace.StartsWith("System")))
+            if (type == null || 
+                (type.IsNested.GetValueOrDefault() && !options.IsNestedType) || 
+                (type.Namespace != null && type.Namespace.StartsWith("System")))
                 return lastNS;
 
             if (type.Namespace != lastNS)
@@ -183,34 +186,73 @@ namespace ServiceStack.NativeTypes.CSharp
             AppendAttributes(sb, type.Attributes);
             AppendDataContract(sb, type.DataContract);
 
-            var partial = Config.MakePartial ? "partial " : "";
-            sb.AppendLine("public {0}class {1}".Fmt(partial, Type(type.Name, type.GenericArgs)));
-
-            //: BaseClass, Interfaces
-            var inheritsList = new List<string>();
-            if (type.Inherits != null)
-                inheritsList.Add(Type(type.Inherits));
-            if (options.ImplementsFn != null)
+            if (type.IsEnum.GetValueOrDefault())
             {
-                var implStr = options.ImplementsFn();
-                if (!string.IsNullOrEmpty(implStr))
-                    inheritsList.Add(implStr);
+                sb.AppendLine("public enum {0}".Fmt(Type(type.Name, type.GenericArgs)));
+                sb.AppendLine("{");
+                sb = sb.Indent();
+
+                if (type.EnumNames != null)
+                {
+                    for (var i = 0; i < type.EnumNames.Count; i++)
+                    {
+                        var name = type.EnumNames[i];
+                        var value = type.EnumValues != null ? type.EnumValues[i] : null;
+                        sb.AppendLine(value == null 
+                            ? "{0},".Fmt(name) 
+                            : "{0} = {1},".Fmt(name, value));
+                    }
+                }
+
+                sb = sb.UnIndent();
+                sb.AppendLine("}");
             }
+            else
+            {
+                var partial = Config.MakePartial ? "partial " : "";
+                sb.AppendLine("public {0}class {1}".Fmt(partial, Type(type.Name, type.GenericArgs)));
 
-            var makeExtensible = Config.MakeDataContractsExtensible && type.Inherits == null;
-            if (makeExtensible)
-                inheritsList.Add("IExtensibleDataObject");
-            if (inheritsList.Count > 0)
-                sb.AppendLine("    : {0}".Fmt(string.Join(", ", inheritsList.ToArray())));
+                //: BaseClass, Interfaces
+                var inheritsList = new List<string>();
+                if (type.Inherits != null)
+                {
+                    inheritsList.Add(Type(type.Inherits, includeNested:true));
+                }
 
-            sb.AppendLine("{");
-            sb = sb.Indent();
+                if (options.ImplementsFn != null)
+                {
+                    var implStr = options.ImplementsFn();
+                    if (!string.IsNullOrEmpty(implStr))
+                        inheritsList.Add(implStr);
+                }
 
-            AddConstuctor(sb, type, options);
-            AddProperties(sb, type);
+                var makeExtensible = Config.MakeDataContractsExtensible && type.Inherits == null;
+                if (makeExtensible)
+                    inheritsList.Add("IExtensibleDataObject");
+                if (inheritsList.Count > 0)
+                    sb.AppendLine("    : {0}".Fmt(string.Join(", ", inheritsList.ToArray())));
 
-            sb = sb.UnIndent();
-            sb.AppendLine("}");
+                sb.AppendLine("{");
+                sb = sb.Indent();
+
+                AddConstuctor(sb, type, options);
+                AddProperties(sb, type);
+
+                foreach (var innerTypeRef in type.InnerTypes.Safe())
+                {
+                    var innerType = allTypes.FirstOrDefault(x => x.Name == innerTypeRef.Name);
+                    if (innerType == null)
+                        continue;
+
+                    sb = sb.UnIndent();
+                    AppendType(ref sb, innerType, lastNS, allTypes,
+                        new CreateTypeOptions { IsNestedType = true });
+                    sb = sb.Indent();
+                }
+
+                sb = sb.UnIndent();
+                sb.AppendLine("}");
+            }
 
             sb = sb.UnIndent();
             return lastNS;
@@ -223,7 +265,7 @@ namespace ServiceStack.NativeTypes.CSharp
 
             var collectionProps = new List<MetadataPropertyType>();
             if (type.Properties != null && Config.InitializeCollections)
-                collectionProps = type.Properties.Where(IsCollection).ToList();
+                collectionProps = type.Properties.Where(x => x.IsCollection()).ToList();
 
             var addVersionInfo = Config.AddImplicitVersion != null && options.IsOperation;
             if (!addVersionInfo && collectionProps.Count <= 0) return;
@@ -252,20 +294,6 @@ namespace ServiceStack.NativeTypes.CSharp
             sb = sb.UnIndent();
             sb.AppendLine("}");
             sb.AppendLine();
-        }
-
-        public static HashSet<string> CollectionTypes = new HashSet<string> {
-            "List`1",
-            "HashSet`1",
-            "Dictionary`2",
-            "Queue`1",
-            "Stack`1",
-        };
-
-        public static bool IsCollection(MetadataPropertyType prop)
-        {
-            return CollectionTypes.Contains(prop.Type)
-                || prop.Type.SplitOnFirst('[').Length > 1;
         }
 
         public void AddProperties(StringBuilderWrapper sb, MetadataType type)
@@ -360,53 +388,58 @@ namespace ServiceStack.NativeTypes.CSharp
             return value;
         }
 
-        public string Type(MetadataTypeName typeName)
+        public string Type(MetadataTypeName typeName, bool includeNested = false)
         {
-            return Type(typeName.Name, typeName.GenericArgs);
+            return Type(typeName.Name, typeName.GenericArgs, includeNested: includeNested);
         }
 
-        public string Type(string type, string[] genericArgs)
+        public string Type(string type, string[] genericArgs, bool includeNested=false)
         {
             if (genericArgs != null)
             {
                 if (type == "Nullable`1")
-                    return "{0}?".Fmt(TypeAlias(genericArgs[0]));
+                    return "{0}?".Fmt(TypeAlias(genericArgs[0], includeNested: includeNested));
 
                 var parts = type.Split('`');
                 if (parts.Length > 1)
                 {
-                    var typeName = parts[0];
                     var args = new StringBuilder();
                     foreach (var arg in genericArgs)
                     {
                         if (args.Length > 0)
                             args.Append(", ");
 
-                        args.Append(TypeAlias(arg));
+                        args.Append(TypeAlias(arg.TrimStart('\''), includeNested: includeNested));
                     }
 
-                    return "{0}<{1}>".Fmt(typeName.SafeToken(), args);
+                    var typeName = NameOnly(type, includeNested: includeNested);
+                    return "{0}<{1}>".Fmt(typeName, args);
                 }
             }
 
-            return TypeAlias(type);
+            return TypeAlias(type, includeNested: includeNested);
         }
 
-        private string TypeAlias(string type)
+        private string TypeAlias(string type, bool includeNested = false)
         {
             var arrParts = type.SplitOnFirst('[');
             if (arrParts.Length > 1)
-                return "{0}[]".Fmt(TypeAlias(arrParts[0]));
+                return "{0}[]".Fmt(TypeAlias(arrParts[0], includeNested: includeNested));
 
             string typeAlias;
-            Config.TypeAlias.TryGetValue(type, out typeAlias);
+            Config.CSharpTypeAlias.TryGetValue(type, out typeAlias);
 
-            return typeAlias ?? type.SafeToken();
+            return typeAlias ?? NameOnly(type, includeNested: includeNested);
         }
 
-        public string NameOnly(string type)
+        public string NameOnly(string type, bool includeNested = false)
         {
-            return type.SplitOnFirst('`')[0].SafeToken();
+            var name = type.SplitOnFirst('`')[0];
+
+            if (!includeNested)
+                name = name.SplitOnLast('.').Last();
+
+            return name.SafeToken();
         }
 
         public void AppendComments(StringBuilderWrapper sb, string desc)

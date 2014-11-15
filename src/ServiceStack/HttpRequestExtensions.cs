@@ -149,6 +149,17 @@ namespace ServiceStack
             return HostContext.ResolveVirtualNode(httpReq.PathInfo, httpReq);
         }
 
+        public static string GetDirectoryPath(this IRequest request)
+        {
+            if (request == null)
+                return null;
+
+            var path = request.PathInfo;
+            return string.IsNullOrEmpty(path) || path[path.Length - 1] == '/'
+                ? path
+                : path.Substring(0, path.LastIndexOf('/') + 1);
+        }
+
         //http://stackoverflow.com/a/757251/85785
         static readonly string[] VirtualPathPrefixes = HostingEnvironment.ApplicationVirtualPath == null || HostingEnvironment.ApplicationVirtualPath == "/"
             ? new string[0]
@@ -700,22 +711,38 @@ namespace ServiceStack
             var baseUrl = HttpHandlerFactory.GetBaseUrl();
             if (baseUrl != null) return baseUrl;
 
-            var handlerPath = HostContext.Config.HandlerFactoryPath;
-            if (handlerPath != null)
+            var pathInfo = httpReq.PathInfo;
+            if (pathInfo != null)
             {
                 var absoluteUri = httpReq.AbsoluteUri;
-                var pos = absoluteUri.IndexOf(handlerPath, StringComparison.OrdinalIgnoreCase);
+                var pos = absoluteUri.IndexOf(pathInfo, StringComparison.OrdinalIgnoreCase);
                 if (pos >= 0)
                 {
-                    baseUrl = absoluteUri.Substring(0, pos + handlerPath.Length);
-                    return baseUrl;
+                    baseUrl = absoluteUri.Substring(0, pos);
+                    return baseUrl.NormalizeScheme();
                 }
-                return "/" + handlerPath;
             }
 
+            var handlerPath = HostContext.Config.HandlerFactoryPath;
+
             return new Uri(httpReq.AbsoluteUri).GetLeftPart(UriPartial.Authority)
+                .NormalizeScheme()
                 .CombineWith(handlerPath)
                 .TrimEnd('/');
+        }
+
+        public static string NormalizeScheme(this string url)
+        {
+            if (url == null)
+                return null;
+            if (!HostContext.Config.UseHttpsLinks)
+                return url;
+
+            url = url.TrimStart();
+            if (url.StartsWith("http://"))
+                return "https://" + url.Substring("http://".Length);
+
+            return url;
         }
 
         public static RequestAttributes ToRequestAttributes(string[] attrNames)
@@ -885,6 +912,26 @@ namespace ServiceStack
             }
         }
 
+        public static Type GetOperationType(this IRequest req)
+        {
+            if (req.Dto != null)
+            {
+                var dtoType = req.Dto.GetType();
+                return dtoType.IsArray
+                    ? dtoType.GetElementType()
+                    : dtoType;
+            }
+            return req.OperationName != null 
+                ? HostContext.Metadata.GetOperationType(req.OperationName) 
+                : null;
+        }
+
+        public static bool IsMultiRequest(this IRequest req)
+        {
+            //Only way to send T[] is via /reply/operation[] predefined route
+            return req.Dto != null && req.Dto.GetType().IsArray;
+        }
+
         public static System.ServiceModel.Channels.Message GetSoapMessage(this IRequest httpReq)
         {
             return httpReq.Items["SoapMessage"] as System.ServiceModel.Channels.Message;
@@ -900,6 +947,13 @@ namespace ServiceStack
             object route;
             req.Items.TryGetValue("__route", out route);
             return route as RestPath;
+        }
+
+        public static string GetPathAndQuery(this HttpRequestBase request)
+        {
+            return request != null && request.Url != null
+                ? request.Url.PathAndQuery
+                : null;
         }
     }
 }

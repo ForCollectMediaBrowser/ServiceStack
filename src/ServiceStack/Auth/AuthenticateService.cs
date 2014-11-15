@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Configuration;
 using ServiceStack.Host;
 using ServiceStack.Text;
@@ -35,7 +36,7 @@ namespace ServiceStack.Auth
         public static string DefaultOAuthRealm { get; private set; }
         public static string HtmlRedirect { get; internal set; }
         public static IAuthProvider[] AuthProviders { get; private set; }
-        
+
         static AuthenticateService()
         {
             CurrentSessionFactory = () => new AuthUserSession();
@@ -107,7 +108,7 @@ namespace ServiceStack.Auth
 
             var oAuthConfig = GetAuthProvider(provider);
             if (oAuthConfig == null)
-                throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
+                throw HttpError.NotFound(ErrorMessages.UnknownAuthProviderFmt.Fmt(provider));
 
             if (LogoutAction.EqualsIgnoreCase(request.provider))
                 return oAuthConfig.Logout(this, request);
@@ -124,7 +125,7 @@ namespace ServiceStack.Auth
                 session = this.GetSession();
 
                 if (request.provider == null && !session.IsAuthenticated)
-                    throw HttpError.Unauthorized("Not Authenticated");
+                    throw HttpError.Unauthorized(ErrorMessages.NotAuthenticated);
 
                 var referrerUrl = request.Continue
                     ?? session.ReferrerUrl
@@ -147,7 +148,7 @@ namespace ServiceStack.Auth
                     if (alreadyAuthenticated)
                         return this.Redirect(referrerUrl.AddHashParam("s", "0"));
 
-                    if (!(response is IHttpResult) && !String.IsNullOrEmpty(referrerUrl))
+                    if (!(response is IHttpResult) && !string.IsNullOrEmpty(referrerUrl))
                     {
                         return new HttpResult(response) {
                             Location = referrerUrl
@@ -162,7 +163,7 @@ namespace ServiceStack.Auth
                 var errorReferrerUrl = this.Request.GetHeader("Referer");
                 if (isHtml && errorReferrerUrl != null)
                 {
-                    errorReferrerUrl = errorReferrerUrl.SetQueryParam("error", ex.Message);
+                    errorReferrerUrl = errorReferrerUrl.AddHashParam("f", ex.Message.Localize(Request));
                     return HttpResult.Redirect(errorReferrerUrl);
                 }
 
@@ -195,7 +196,7 @@ namespace ServiceStack.Auth
                 var provider = request.provider ?? AuthProviders[0].Provider;
                 var oAuthConfig = GetAuthProvider(provider);
                 if (oAuthConfig == null)
-                    throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
+                    throw HttpError.NotFound(ErrorMessages.UnknownAuthProviderFmt.Fmt(provider));
 
                 if (request.provider == LogoutAction)
                     return oAuthConfig.Logout(this, request) as AuthenticateResponse;
@@ -244,6 +245,5 @@ namespace ServiceStack.Auth
             return new AuthenticateResponse();
         }
     }
-
 }
 

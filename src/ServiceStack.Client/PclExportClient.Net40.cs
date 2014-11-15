@@ -4,6 +4,8 @@
 #if !(XBOX || SL5 || NETFX_CORE || WP || PCL)
 using System;
 using System.Collections.Specialized;
+using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Web;
 using ServiceStack;
@@ -17,7 +19,7 @@ namespace ServiceStack
 
         public static PclExportClient Configure()
         {
-            Configure(Provider);
+            Configure(Provider ?? (Provider = new Net40PclExportClient()));
             Net40PclExport.Configure();
             return Provider;
         }
@@ -52,10 +54,16 @@ namespace ServiceStack
             return HttpUtility.HtmlDecode(html);
         }
 
-        public override ITimer CreateTimer<TResponse>(AsyncState<TResponse> state, TimeSpan timeOut)
+        public override string GetHeader(WebHeaderCollection headers, string name, Func<string, bool> valuePredicate)
+        {
+            var values = headers.GetValues(name);
+            return values == null ? null : values.FirstOrDefault(valuePredicate);
+        }
+
+        public override ITimer CreateTimer(TimerCallback cb, TimeSpan timeOut, object state)
         {
             return new AsyncTimer(new
-                System.Threading.Timer(state.TimedOut, state, (int)timeOut.TotalMilliseconds, Timeout.Infinite));
+                System.Threading.Timer(s => cb(s), state, (int)timeOut.TotalMilliseconds, Timeout.Infinite));
         }
     }
 
@@ -70,6 +78,8 @@ namespace ServiceStack
 
         public void Cancel()
         {
+            if (Timer == null) return;
+            
             this.Timer.Change(Timeout.Infinite, Timeout.Infinite);
             this.Dispose();
         }

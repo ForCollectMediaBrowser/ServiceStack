@@ -48,6 +48,11 @@ namespace ServiceStack.Auth
             }
         }
 
+        public IAuthEvents AuthEvents
+        {
+            get { return HostContext.TryResolve<IAuthEvents>() ?? new AuthEvents(); }
+        }
+
         /// <summary>
         /// Allows specifying a global fallback config that if exists is formatted with the Provider as the first arg.
         /// E.g. this appSetting with the TwitterAuthProvider: 
@@ -76,6 +81,7 @@ namespace ServiceStack.Auth
                 ?? this.CallbackUrl;
 
             session.OnLogout(service);
+            AuthEvents.OnLogout(service.Request, session, service);
 
             service.RemoveSession();
 
@@ -210,6 +216,7 @@ namespace ServiceStack.Auth
 
                 session.IsAuthenticated = true;
                 session.OnAuthenticated(authService, session, tokens, authInfo);
+                AuthEvents.OnAuthenticated(authService.Request, session, authService, tokens, authInfo);
             }
             finally
             {
@@ -301,33 +308,46 @@ namespace ServiceStack.Auth
             httpRes.EndRequest();
         }
 
-        protected virtual void AssertNotLocked(IUserAuth userAuth)
+        protected virtual bool EmailAlreadyExists(IAuthRepository authRepo, IUserAuth userAuth, IAuthTokens tokens = null)
         {
-            if (userAuth.LockedDate != null)
-                throw new AuthenticationException("This account has been locked");
+            if (ValidateUniqueEmails && tokens != null && tokens.Email != null)
+            {
+                var userWithEmail = authRepo.GetUserAuthByUserName(tokens.Email);
+                if (userWithEmail == null) 
+                    return false;
+
+                var isAnotherUser = userAuth == null || (userAuth.Id != userWithEmail.Id);
+                if (isAnotherUser)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        protected virtual string GetAuthRedirectUrl(IServiceBase authService, IAuthSession session)
+        {
+            return session.ReferrerUrl;
+        }
+
+        protected virtual bool IsAccountLocked(IAuthRepository authRepo, IUserAuth userAuth, IAuthTokens tokens=null)
+        {
+            if (userAuth == null) return false;
+            return userAuth.LockedDate != null;
         }
 
         protected virtual IHttpResult ValidateAccount(IServiceBase authService, IAuthRepository authRepo, IAuthSession session, IAuthTokens tokens)
         {
             var userAuth = authRepo.GetUserAuth(session, tokens);
 
-            if (ValidateUniqueEmails && tokens != null && tokens.Email != null)
+            if (EmailAlreadyExists(authRepo, userAuth, tokens))
             {
-                var userWithEmail = authRepo.GetUserAuthByUserName(tokens.Email);
-                if (userWithEmail == null) return null;
-
-                var isAnotherUser = userAuth == null || (userAuth.Id != userWithEmail.Id);
-                if (isAnotherUser)
-                {
-                    return authService.Redirect(session.ReferrerUrl.AddHashParam("f", "EmailAlreadyExists"));
-                }
+                return authService.Redirect(GetReferrerUrl(authService, session).AddHashParam("f", "EmailAlreadyExists"));
             }
 
-            if (userAuth == null) return null;
-            var isLocked = userAuth.LockedDate != null;
-            if (isLocked)
+            if (IsAccountLocked(authRepo, userAuth, tokens))
             {
-                return authService.Redirect(session.ReferrerUrl.AddHashParam("f", "AccountLocked"));
+                return authService.Redirect(GetReferrerUrl(authService, session).AddHashParam("f", "AccountLocked"));
             }
 
             return null;
@@ -335,12 +355,15 @@ namespace ServiceStack.Auth
 
         protected virtual string GetReferrerUrl(IServiceBase authService, IAuthSession session, Authenticate request = null)
         {
-            var requestUri = authService.Request.AbsoluteUri;
+            if (request == null)
+                request = authService.Request.Dto as Authenticate;
+
             var referrerUrl = session.ReferrerUrl;
             if (referrerUrl.IsNullOrEmpty())
                 referrerUrl = (request != null ? request.Continue : null)
                     ?? authService.Request.GetHeader("Referer");
 
+            var requestUri = authService.Request.AbsoluteUri;
             if (referrerUrl.IsNullOrEmpty()
                 || referrerUrl.IndexOf("/auth", StringComparison.OrdinalIgnoreCase) >= 0)
                 return this.RedirectUrl

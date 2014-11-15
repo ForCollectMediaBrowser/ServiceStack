@@ -6,6 +6,7 @@ using System.Net;
 using System.Runtime.Serialization;
 using System.Web;
 using Funq;
+using ServiceStack.Configuration;
 using ServiceStack.Host;
 using ServiceStack.Host.HttpListener;
 using ServiceStack.IO;
@@ -81,6 +82,11 @@ namespace ServiceStack
         public static HostConfig Config
         {
             get { return AssertAppHost().Config; }
+        }
+
+        public static IAppSettings AppSettings
+        {
+            get { return AssertAppHost().AppSettings; }
         }
 
         public static ServiceMetadata Metadata
@@ -233,9 +239,9 @@ namespace ServiceStack
                 "Request with '{0}' is not allowed".Fmt(requestAttrs));
         }
 
-        public static string ResolveLocalizedString(string text)
+        public static string ResolveLocalizedString(string text, IRequest request=null)
         {
-            return AssertAppHost().ResolveLocalizedString(text);
+            return AssertAppHost().ResolveLocalizedString(text, request);
         }
 
         public static string ResolveAbsoluteUrl(string virtualPath, IRequest httpReq)

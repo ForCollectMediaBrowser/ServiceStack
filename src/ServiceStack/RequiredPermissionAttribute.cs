@@ -45,7 +45,7 @@ namespace ServiceStack
             if (DoHtmlRedirectIfConfigured(req, res)) return;
 
             res.StatusCode = (int)HttpStatusCode.Forbidden;
-            res.StatusDescription = "Invalid Permission";
+            res.StatusDescription = ErrorMessages.InvalidPermission.Localize(req);
             res.EndRequest();
         }
 
@@ -69,6 +69,28 @@ namespace ServiceStack
                 return false;
 
             return this.RequiredPermissions.All(session.HasPermission);
+        }
+
+        protected bool Equals(RequiredPermissionAttribute other)
+        {
+            return base.Equals(other) 
+                && Equals(RequiredPermissions, other.RequiredPermissions);
+        }
+
+        public override bool Equals(object obj)
+        {
+            if (ReferenceEquals(null, obj)) return false;
+            if (ReferenceEquals(this, obj)) return true;
+            if (obj.GetType() != this.GetType()) return false;
+            return Equals((RequiredPermissionAttribute) obj);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (base.GetHashCode()*397) ^ (RequiredPermissions != null ? RequiredPermissions.GetHashCode() : 0);
+            }
         }
     }
 

@@ -15,7 +15,7 @@ namespace ServiceStack
             MetadataTypesConfig = new MetadataTypesConfig
             {
                 AddDefaultXmlNamespace = HostConfig.DefaultWsdlNamespace,
-                TypeAlias = new Dictionary<string, string> 
+                CSharpTypeAlias = new Dictionary<string, string> 
                 {
                     { "String", "string" },    
                     { "Boolean", "bool" },    
@@ -30,8 +30,56 @@ namespace ServiceStack
                     { "Double", "double" },    
                     { "Decimal", "decimal" },    
                 },
+                FSharpTypeAlias = new Dictionary<string, string>
+                {
+                },
+                VbNetTypeAlias = new Dictionary<string, string>
+                {
+                    { "Int16", "Short" },    
+                    { "Int32", "Integer" },    
+                    { "Int64", "Long" },    
+                    { "DateTime", "Date" },    
+                },
+                VbNetKeyWords = new HashSet<string>
+                {
+                    "Default",
+                    "Dim",
+                    "Catch",
+                    "Byte",
+                    "Short",
+                    "Integer",
+                    "Long",
+                    "UShort",
+                    "ULong",
+                    "Double",
+                    "Decimal",
+                    "String",
+                    "Object",
+                    "Each",
+                    "Error",
+                    "Finally",
+                    "Function",
+                    "Global",
+                    "If",
+                    "Imports",
+                    "Inherits",
+                    "Not",
+                    "IsNot",
+                    "Module",
+                    "MyBase",
+                    "Option",
+                    "Out",
+                    "Protected",
+                    "Return",
+                    "Shadows",
+                    "Static",
+                    "Then",
+                    "With",
+                    "When",
+                },
                 ExportAttributes = new HashSet<Type>
                 {
+                    typeof(FlagsAttribute),
                     typeof(ApiAttribute),
                     typeof(ApiResponseAttribute),
                     typeof(ApiMemberAttribute),

@@ -1,13 +1,66 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Configuration;
-using Funq;
+using System.Linq;
 using NUnit.Framework;
 using ServiceStack.Configuration;
 using ServiceStack.OrmLite;
+using ServiceStack.Text;
 
 namespace ServiceStack.Common.Tests
 {
+    [TestFixture]
+    public class EnvironmentAppSettingsTests
+    {
+        [Test]
+        public void Can_get_environment_variable()
+        {
+            var env = new EnvironmentVariableSettings();
+            var path = env.Get("PATH");
+            Assert.That(path, Is.Not.Null);
+            path.Print();
+
+            var unknown = env.Get("UNKNOWN");
+            Assert.That(unknown, Is.Null);
+
+            var envVars = env.GetAllKeys();
+            Assert.That(envVars.Count, Is.GreaterThan(0));
+
+            envVars.PrintDump();
+        }
+    }
+
+    public class MultiAppSettingsTest : AppSettingsTest
+    {
+        public override AppSettingsBase GetAppSettings()
+        {
+            return new MultiAppSettings(
+                new DictionarySettings(GetConfigDictionary()),
+                new AppSettings());
+        }
+
+        public override Dictionary<string, string> GetConfigDictionary()
+        {
+            var configMap = base.GetConfigDictionary();
+            configMap.Remove("NullableKey");
+            return configMap;
+        }
+    }
+
+    public class AppConfigAppSettingsTest : AppSettingsTest
+    {
+        public override AppSettingsBase GetAppSettings()
+        {
+            return new AppSettings();
+        }
+
+        public override Dictionary<string, string> GetConfigDictionary()
+        {
+            var configMap = base.GetConfigDictionary();
+            configMap.Remove("NullableKey");
+            return configMap;
+        }
+    }
+
     public class OrmLiteAppSettingsTest : AppSettingsTest
     {
         private OrmLiteAppSettings settings;
@@ -36,6 +89,21 @@ namespace ServiceStack.Common.Tests
             }
 
             return settings;
+        }
+
+        [Test]
+        public void Can_preload_AppSettings()
+        {
+            GetAppSettings();
+            using (var db = settings.DbFactory.Open())
+            {
+                var allSettings = db.Dictionary<string,string>(
+                    db.From<ConfigSetting>().Select(x => new { x.Id, x.Value}));
+
+                var cachedSettings = new DictionarySettings(allSettings);
+
+                Assert.That(cachedSettings.Get("RealKey"), Is.EqualTo("This is a real value"));
+            }
         }
 
         [Test]
@@ -93,12 +161,12 @@ namespace ServiceStack.Common.Tests
         public void Does_work_with_ParseKeyValueText()
         {
             var textFile = @"
-EmptyKey: 
-RealKey: This is a real value
-ListKey: A,B,C,D,E
-IntKey: 42
-DictionaryKey: A:1,B:2,C:3,D:4,E:5
-ObjectKey: {SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}";
+EmptyKey  
+RealKey This is a real value
+ListKey A,B,C,D,E
+IntKey 42
+DictionaryKey A:1,B:2,C:3,D:4,E:5
+ObjectKey {SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}";
 
             var settings = textFile.ParseKeyValueText();
             var appSettings = new DictionarySettings(settings);
@@ -130,7 +198,15 @@ ObjectKey: {SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}";
     {
         public virtual AppSettingsBase GetAppSettings()
         {
-            return new DictionarySettings(new Dictionary<string, string>
+            return new DictionarySettings(GetConfigDictionary())
+            {
+                ParsingStrategy = null,   
+            };
+        }
+
+        public virtual Dictionary<string, string> GetConfigDictionary()
+        {
+            return new Dictionary<string, string>
             {
                 {"NullableKey", null},
                 {"EmptyKey", string.Empty},
@@ -142,8 +218,6 @@ ObjectKey: {SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}";
                 {"BadDictionaryKey", "A1,B:"},
                 {"ObjectNoLineFeed", "{SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}"},
                 {"ObjectWithLineFeed", "{SomeSetting:Test,\r\nSomeOtherSetting:12,\r\nFinalSetting:Final}"},
-            }) {
-                ParsingStrategy = null,   
             };
         }
 
@@ -276,11 +350,42 @@ ObjectKey: {SomeSetting:Test,SomeOtherSetting:12,FinalSetting:Final}";
             Assert.That(value.SomeSetting, Is.EqualTo("Test"));
         }
 
+        [Test]
+        public void Can_write_to_AppSettings()
+        {
+            var appSettings = GetAppSettings();
+            var value = appSettings.Get("IntKey", 0);
+            Assert.That(value, Is.EqualTo(42));
+
+            appSettings.Set("IntKey", 99);
+            value = appSettings.Get("IntKey", 0);
+            Assert.That(value, Is.EqualTo(99));
+        }
+
         public class SimpleAppSettings
         {
             public string SomeSetting { get; set; }
             public int SomeOtherSetting { get; set; }
             public string FinalSetting { get; set; }
+        }
+
+        [Test]
+        public void Can_get_all_keys()
+        {
+            var appSettings = GetAppSettings();
+            var allKeys = appSettings.GetAllKeys();
+            allKeys.Remove("servicestack:license");
+
+            Assert.That(allKeys, Is.EquivalentTo(GetConfigDictionary().Keys));
+        }
+
+        [Test]
+        public void Can_search_all_keys()
+        {
+            var appSettings = GetAppSettings();
+            var badKeys = appSettings.GetAllKeys().Where(x => x.Matches("Bad*"));
+
+            Assert.That(badKeys, Is.EquivalentTo(new[] { "BadIntegerKey", "BadDictionaryKey" }));
         }
     }
 }

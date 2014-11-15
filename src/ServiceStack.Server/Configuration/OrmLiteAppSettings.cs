@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using ServiceStack.Auth;
 using ServiceStack.Data;
 using ServiceStack.OrmLite;
@@ -11,7 +12,7 @@ namespace ServiceStack.Configuration
         public string Value { get; set; }
     }
 
-    public class OrmLiteAppSettings : AppSettingsBase, IRequiresSchema 
+    public class OrmLiteAppSettings : AppSettingsBase, IRequiresSchema
     {
         private OrmLiteSettings DbSettings
         {
@@ -26,7 +27,7 @@ namespace ServiceStack.Configuration
         public OrmLiteAppSettings(IDbConnectionFactory dbFactory)
             : base(new OrmLiteSettings(dbFactory)) {}
 
-        class OrmLiteSettings : ISettings
+        class OrmLiteSettings : ISettingsWriter
         {
             public IDbConnectionFactory DbFactory { get; private set; }
 
@@ -41,6 +42,14 @@ namespace ServiceStack.Configuration
                 {
                     var config = db.SingleById<ConfigSetting>(key);
                     return config != null ? config.Value : null;
+                }
+            }
+
+            public List<string> GetAllKeys()
+            {
+                using (var db = DbFactory.Open())
+                {
+                    return db.Column<string>(db.From<ConfigSetting>().Select(x => x.Id));
                 }
             }
 

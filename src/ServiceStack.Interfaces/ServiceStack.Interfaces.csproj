@@ -134,6 +134,7 @@
     <Compile Include="Data\OptimisticConcurrencyException.cs" />
     <Compile Include="IO\IEndpoint.cs" />
     <Compile Include="IQuery.cs" />
+    <Compile Include="IReceiver.cs" />
     <Compile Include="IRestGateway.cs" />
     <Compile Include="Logging\DebugLogFactory.cs" />
     <Compile Include="Logging\DebugLogger.cs" />
@@ -263,6 +264,7 @@
     <Compile Include="Redis\IRedisNativeClient.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Redis\IRedisPubSubServer.cs" />
     <Compile Include="Redis\IRedisSet.cs">
       <SubType>Code</SubType>
     </Compile>
@@ -291,9 +293,13 @@
     <Compile Include="Redis\Pipeline\IRedisQueueCompletableOperation.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Redis\RedisClientType.cs" />
     <Compile Include="Redis\RedisKeyType.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Redis\RedisServerRole.cs" />
+    <Compile Include="Redis\RedisData.cs" />
+    <Compile Include="Redis\RedisText.cs" />
     <Compile Include="Redis\ScanResult.cs" />
     <Compile Include="Redis\SortOptions.cs">
       <SubType>Code</SubType>
