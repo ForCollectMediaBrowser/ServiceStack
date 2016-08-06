@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Runtime.Serialization;
 using ServiceStack.Web;
 
 namespace ServiceStack.Auth
@@ -22,14 +21,18 @@ namespace ServiceStack.Auth
         List<string> Roles { get; set; }
         List<string> Permissions { get; set; }
         bool IsAuthenticated { get; set; }
+        bool FromToken { get; set; } //Partially restored from JWT
+        string ProfileUrl { get; set; }
+
         //Used for digest authentication replay protection
         string Sequence { get; set; }
 
-        bool HasRole(string role);
-        bool HasPermission(string permission);
+        bool HasRole(string role, IAuthRepository authRepo);
+        bool HasPermission(string permission, IAuthRepository authRepo);
+
         bool IsAuthorized(string provider);
 
-        void OnRegistered(IServiceBase registrationService);
+        void OnRegistered(IRequest httpReq, IAuthSession session, IServiceBase service);
         void OnAuthenticated(IServiceBase authService, IAuthSession session, IAuthTokens tokens, Dictionary<string, string> authInfo);
         void OnLogout(IServiceBase authService);
         void OnCreated(IRequest httpReq);

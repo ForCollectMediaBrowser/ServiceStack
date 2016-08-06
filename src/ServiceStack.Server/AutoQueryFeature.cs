@@ -5,20 +5,33 @@ using System.Data;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.Serialization;
 using System.Threading;
 
 using Funq;
-using ServiceStack.Host;
 using ServiceStack.MiniProfiler;
 using ServiceStack.Reflection;
 using ServiceStack.Text;
 using ServiceStack.Web;
 using ServiceStack.Data;
+using ServiceStack.Logging;
 using ServiceStack.OrmLite;
 
 namespace ServiceStack
 {
-    public delegate ISqlExpression QueryFilterDelegate(IRequest request, ISqlExpression sqlExpression, IQuery model);
+    public delegate void QueryFilterDelegate(ISqlExpression q, IQueryDb dto, IRequest req);
+
+    public class QueryDbFilterContext
+    {
+        public IDbConnection Db { get; set; }
+        public List<Command> Commands { get; set; }
+        public IQueryDb Dto { get; set; }
+        public ISqlExpression SqlExpression { get; set; }
+        public IQueryResponse Response { get; set; }
+
+        [Obsolete("Use Dto")]
+        public IQueryDb Request { get { return Dto; } }
+    }
 
     public class AutoQueryFeature : IPlugin, IPostInitPlugin
     {
@@ -27,17 +40,25 @@ namespace ServiceStack
         public HashSet<Assembly> LoadFromAssemblies { get; set; } 
         public int? MaxLimit { get; set; }
         public string UseNamedConnection { get; set; }
+        public bool StripUpperInLike { get; set; }
+        public bool IncludeTotal { get; set; }
         public bool EnableUntypedQueries { get; set; }
         public bool EnableRawSqlFilters { get; set; }
+        public bool EnableAutoQueryViewer { get; set; }
         public bool OrderByPrimaryKeyOnPagedQuery { get; set; }
         public Type AutoQueryServiceBaseType { get; set; }
         public Dictionary<Type, QueryFilterDelegate> QueryFilters { get; set; }
+        public List<Action<QueryDbFilterContext>> ResponseFilters { get; set; }
+        public Action<Type, TypeBuilder, MethodBuilder, ILGenerator> GenerateServiceFilter { get; set; }
 
         public const string GreaterThanOrEqualFormat = "{Field} >= {Value}";
         public const string GreaterThanFormat =        "{Field} > {Value}";
         public const string LessThanFormat =           "{Field} < {Value}";
         public const string LessThanOrEqualFormat =    "{Field} <= {Value}";
-        
+        public const string NotEqualFormat =           "{Field} <> {Value}";
+        public const string CaseSensitiveLikeFormat =  "{Field} LIKE {Value}";
+        public const string CaseInsensitiveLikeFormat = "UPPER({Field}) LIKE UPPER({Value})";
+
         public Dictionary<string, string> ImplicitConventions = new Dictionary<string, string> 
         {
             {"%Above%",         GreaterThanFormat},
@@ -53,11 +74,13 @@ namespace ServiceStack
             {"%Higher%",        GreaterThanOrEqualFormat},
             {">%",              GreaterThanOrEqualFormat},
             {"%>",              GreaterThanFormat},
+            {"%!",              NotEqualFormat},
 
             {"%GreaterThanOrEqualTo%", GreaterThanOrEqualFormat},
             {"%GreaterThan%",          GreaterThanFormat},
             {"%LessThan%",             LessThanFormat},
             {"%LessThanOrEqualTo%",    LessThanOrEqualFormat},
+            {"%NotEqualTo",            NotEqualFormat},
 
             {"Behind%",         LessThanFormat},
             {"%Below%",         LessThanFormat},
@@ -73,67 +96,91 @@ namespace ServiceStack
             {"%<",              LessThanOrEqualFormat},
             {"<%",              LessThanFormat},
 
-            {"Like%",           "UPPER({Field}) LIKE UPPER({Value})"},
+            {"%Like%",          CaseInsensitiveLikeFormat },
             {"%In",             "{Field} IN ({Values})"},
             {"%Ids",            "{Field} IN ({Values})"},
             {"%Between%",       "{Field} BETWEEN {Value1} AND {Value2}"},
         };
 
-        public Dictionary<string, QueryFieldAttribute> StartsWithConventions =
-            new Dictionary<string, QueryFieldAttribute>();
+        public Dictionary<string, QueryDbFieldAttribute> StartsWithConventions =
+            new Dictionary<string, QueryDbFieldAttribute>();
 
-        public Dictionary<string, QueryFieldAttribute> EndsWithConventions = new Dictionary<string, QueryFieldAttribute>
+        public Dictionary<string, QueryDbFieldAttribute> EndsWithConventions = new Dictionary<string, QueryDbFieldAttribute>
         {
-            { "StartsWith", new QueryFieldAttribute { Template = "UPPER({Field}) LIKE UPPER({Value})", ValueFormat = "{0}%" }},
-            { "Contains", new QueryFieldAttribute { Template = "UPPER({Field}) LIKE UPPER({Value})", ValueFormat = "%{0}%" }},
-            { "EndsWith", new QueryFieldAttribute { Template = "UPPER({Field}) LIKE UPPER({Value})", ValueFormat = "%{0}" }},
+            { "StartsWith", new QueryDbFieldAttribute { Template = CaseInsensitiveLikeFormat, ValueFormat = "{0}%" }},
+            { "Contains", new QueryDbFieldAttribute { Template = CaseInsensitiveLikeFormat, ValueFormat = "%{0}%" }},
+            { "EndsWith", new QueryDbFieldAttribute { Template = CaseInsensitiveLikeFormat, ValueFormat = "%{0}" }},
         };
 
         public AutoQueryFeature()
         {
-            IgnoreProperties = new HashSet<string>(new[] { "Skip", "Take", "OrderBy", "OrderByDesc", "_select", "_from", "_join", "_where" }, 
+            IgnoreProperties = new HashSet<string>(new[] { "Skip", "Take", "OrderBy", "OrderByDesc", "Fields", "_select", "_from", "_join", "_where" }, 
                 StringComparer.OrdinalIgnoreCase);
             IllegalSqlFragmentTokens = new HashSet<string>();
             AutoQueryServiceBaseType = typeof(AutoQueryServiceBase);
             QueryFilters = new Dictionary<Type, QueryFilterDelegate>();
+            ResponseFilters = new List<Action<QueryDbFilterContext>> { IncludeAggregates };
+            IncludeTotal = true;
             EnableUntypedQueries = true;
+            EnableAutoQueryViewer = true;
             OrderByPrimaryKeyOnPagedQuery = true;
+            StripUpperInLike = OrmLiteConfig.StripUpperInLike;
             LoadFromAssemblies = new HashSet<Assembly>();
         }
 
         public void Register(IAppHost appHost)
         {
+            if (StripUpperInLike)
+            {
+                string convention;
+                if (ImplicitConventions.TryGetValue("%Like%", out convention) && convention == CaseInsensitiveLikeFormat)
+                    ImplicitConventions["%Like%"] = CaseSensitiveLikeFormat;
+
+                foreach (var attr in EndsWithConventions)
+                {
+                    if (attr.Value.Template == CaseInsensitiveLikeFormat)
+                        attr.Value.Template = CaseSensitiveLikeFormat;
+                }
+            }
+
             foreach (var entry in ImplicitConventions)
             {
                 var key = entry.Key.Trim('%');
                 var fmt = entry.Value;
-                var query = new QueryFieldAttribute { Template = fmt }.Init();
+                var query = new QueryDbFieldAttribute { Template = fmt }.Init();
                 if (entry.Key.EndsWith("%"))
                     StartsWithConventions[key] = query;
                 if (entry.Key.StartsWith("%"))
                     EndsWithConventions[key] = query;
             }
 
-            appHost.GetContainer().Register<IAutoQuery>(c =>
-                new AutoQuery
+            appHost.GetContainer().Register<IAutoQueryDb>(c => new AutoQuery
                 {
-                    IgnoreProperties = IgnoreProperties,                    
+                    IgnoreProperties = IgnoreProperties,
                     IllegalSqlFragmentTokens = IllegalSqlFragmentTokens,
                     MaxLimit = MaxLimit,
+                    IncludeTotal = IncludeTotal,
                     EnableUntypedQueries = EnableUntypedQueries,
                     EnableSqlFilters = EnableRawSqlFilters,
                     OrderByPrimaryKeyOnLimitQuery = OrderByPrimaryKeyOnPagedQuery,
                     QueryFilters = QueryFilters,
+                    ResponseFilters = ResponseFilters,
                     StartsWithConventions = StartsWithConventions,
                     EndsWithConventions = EndsWithConventions,
-                    Db = UseNamedConnection != null
-                        ? c.Resolve<IDbConnectionFactory>().OpenDbConnection(UseNamedConnection)
-                        : c.Resolve<IDbConnectionFactory>().OpenDbConnection(),
+                    UseNamedConnection = UseNamedConnection,
                 })
                 .ReusedWithin(ReuseScope.None);
 
             appHost.Metadata.GetOperationAssemblies()
                 .Each(x => LoadFromAssemblies.Add(x));
+
+            ((ServiceStackHost)appHost).ServiceAssemblies.Each(x => {
+                if (!LoadFromAssemblies.Contains(x))
+                    LoadFromAssemblies.Add(x);
+            });
+
+            if (EnableAutoQueryViewer && appHost.GetPlugin<AutoQueryMetadataFeature>() == null)
+                appHost.LoadPlugin(new AutoQueryMetadataFeature { MaxLimit = MaxLimit });
         }
 
         public void AfterPluginsLoaded(IAppHost appHost)
@@ -141,7 +188,7 @@ namespace ServiceStack
             var scannedTypes = LoadFromAssemblies.SelectMany(x => x.GetTypes());
 
             var misingRequestTypes = scannedTypes
-                .Where(x => x.HasInterface(typeof(IQuery)))
+                .Where(x => x.HasInterface(typeof(IQueryDb)))
                 .Where(x => !appHost.Metadata.OperationsMap.ContainsKey(x))
                 .ToList();
 
@@ -162,29 +209,24 @@ namespace ServiceStack
                     TypeAttributes.Public | TypeAttributes.Class,
                     AutoQueryServiceBaseType);
 
-            var emptyCtor = typeBuilder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, Type.EmptyTypes);
-            var baseType = AutoQueryServiceBaseType.BaseType;
-            if (baseType != null)
-            {
-                var ctorIl = emptyCtor.GetILGenerator();
-                ctorIl.Emit(OpCodes.Ldarg_0);
-                ctorIl.Emit(OpCodes.Call, baseType.GetEmptyConstructor());
-                ctorIl.Emit(OpCodes.Ret);
-            }
-
             foreach (var requestType in misingRequestTypes)
             {
+                var genericDef = requestType.GetTypeWithGenericTypeDefinitionOf(typeof(IQueryDb<,>));
+                var hasExplicitInto = genericDef != null;
+                if (genericDef == null)
+                    genericDef = requestType.GetTypeWithGenericTypeDefinitionOf(typeof(IQueryDb<>));
+                if (genericDef == null)
+                    continue;
+
                 var method = typeBuilder.DefineMethod("Any", MethodAttributes.Public | MethodAttributes.Virtual,
                     CallingConventions.Standard,
                     returnType: typeof(object),
                     parameterTypes: new[] { requestType });
 
-                var genericDef = requestType.GetTypeWithGenericTypeDefinitionOf(typeof(IQuery<,>));
-                var hasExplicitInto = genericDef != null;
-                if (genericDef == null)
-                    genericDef = requestType.GetTypeWithGenericTypeDefinitionOf(typeof(IQuery<>));
-
                 var il = method.GetILGenerator();
+                
+                if (GenerateServiceFilter != null)
+                    GenerateServiceFilter(requestType, typeBuilder, method, il);
 
                 var genericArgs = genericDef.GetGenericArguments();
                 var mi = AutoQueryServiceBaseType.GetMethods()
@@ -192,8 +234,8 @@ namespace ServiceStack
                 var genericMi = mi.MakeGenericMethod(genericArgs);
 
                 var queryType = hasExplicitInto
-                    ? typeof(IQuery<,>).MakeGenericType(genericArgs)
-                    : typeof(IQuery<>).MakeGenericType(genericArgs);
+                    ? typeof(IQueryDb<,>).MakeGenericType(genericArgs)
+                    : typeof(IQueryDb<>).MakeGenericType(genericArgs);
 
                 il.Emit(OpCodes.Nop);
                 il.Emit(OpCodes.Ldarg_0);
@@ -207,36 +249,131 @@ namespace ServiceStack
             return servicesType;
         }
 
-        public AutoQueryFeature RegisterQueryFilter<Request, From>(Func<IRequest, SqlExpression<From>, Request, SqlExpression<From>> filterFn)
+        public AutoQueryFeature RegisterQueryFilter<Request, From>(Action<SqlExpression<From>, Request, IRequest> filterFn)
         {
-            QueryFilters[typeof(Request)] = (req, expression, model) =>
-                filterFn(req, (SqlExpression<From>)expression, (Request)model);
+            QueryFilters[typeof(Request)] = (q, dto, req) =>
+                filterFn((SqlExpression<From>)q, (Request)dto, req);
 
             return this;
         }
+
+        public HashSet<string> SqlAggregateFunctions = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase)
+        {
+            "AVG", "COUNT", "FIRST", "LAST", "MAX", "MIN", "SUM"
+        };
+
+        public void IncludeAggregates(QueryDbFilterContext ctx)
+        {
+            var commands = ctx.Commands;
+            if (commands.Count == 0)
+                return;
+
+            var q = ctx.SqlExpression.GetUntypedSqlExpression()
+                .Clone()
+                .ClearLimits()
+                .OrderBy();
+
+            var aggregateCommands = new List<Command>();
+            foreach (var cmd in commands)
+            {
+                if (!SqlAggregateFunctions.Contains(cmd.Name))
+                    continue;
+
+                aggregateCommands.Add(cmd);
+
+                if (cmd.Args.Count == 0)
+                    cmd.Args.Add("*");
+
+                cmd.Original = cmd.ToString();
+
+                var hasAlias = !string.IsNullOrWhiteSpace(cmd.Suffix);
+
+                for (var i = 0; i < cmd.Args.Count; i++)
+                {
+                    var arg = cmd.Args[i];
+
+                    string modifier = "";
+                    if (arg.StartsWithIgnoreCase("DISTINCT "))
+                    {
+                        var argParts = arg.SplitOnFirst(' ');
+                        modifier = argParts[0] + " ";
+                        arg = argParts[1];
+                    }
+
+                    var fieldRef = q.FirstMatchingField(arg);
+                    if (fieldRef != null)
+                    {
+                        //To return predictable aliases, if it's primary table don't fully qualify name
+                        var fieldName = fieldRef.Item2.FieldName;
+                        var needsRewrite = !fieldName.EqualsIgnoreCase(q.DialectProvider.NamingStrategy.GetColumnName(fieldName)); 
+                        if (fieldRef.Item1 != q.ModelDef || fieldRef.Item2.Alias != null || needsRewrite || hasAlias)
+                        {
+                            cmd.Args[i] = modifier + q.DialectProvider.GetQuotedColumnName(fieldRef.Item1, fieldRef.Item2);
+                        }
+                    }
+                    else
+                    {
+                        double d;
+                        if (arg != "*" && !double.TryParse(arg, out d))
+                        {
+                            cmd.Args[i] = "{0}".SqlFmt(arg);
+                        }
+                    }
+                }
+
+                if (hasAlias)
+                {
+                    var alias = cmd.Suffix.TrimStart();
+                    if (alias.StartsWithIgnoreCase("as "))
+                        alias = alias.Substring("as ".Length);
+
+                    cmd.Suffix = " " + alias.SafeVarName();
+                }
+                else
+                {
+                    cmd.Suffix = " " + q.DialectProvider.GetQuotedName(cmd.Original);
+                }
+            }
+
+            var selectSql = string.Join(", ", aggregateCommands.Map(x => x.ToString()));
+            q.UnsafeSelect(selectSql);
+
+            var rows = ctx.Db.Select<Dictionary<string, object>>(q);
+            var row = rows.FirstOrDefault();
+
+            foreach (var key in row.Keys)
+            {
+                ctx.Response.Meta[key] = row[key].ToString();
+            }
+
+            ctx.Commands.RemoveAll(aggregateCommands.Contains);
+        }
     }
 
-    public interface IAutoQuery
+    [Obsolete("Use IAutoQueryDb")]
+    public interface IAutoQuery { }
+
+    public interface IAutoQueryDb
     {
-        SqlExpression<From> CreateQuery<From>(IQuery<From> model, Dictionary<string, string> dynamicParams, IRequest request = null);
+        SqlExpression<From> CreateQuery<From>(IQueryDb<From> dto, Dictionary<string, string> dynamicParams, IRequest req = null);
 
-        QueryResponse<From> Execute<From>(IQuery<From> model, SqlExpression<From> query);
+        QueryResponse<From> Execute<From>(IQueryDb<From> model, SqlExpression<From> query);
 
-        SqlExpression<From> CreateQuery<From, Into>(IQuery<From, Into> model, Dictionary<string, string> dynamicParams, IRequest request = null);
+        SqlExpression<From> CreateQuery<From, Into>(IQueryDb<From, Into> dto, Dictionary<string, string> dynamicParams, IRequest req = null);
 
-        QueryResponse<Into> Execute<From, Into>(IQuery<From, Into> model, SqlExpression<From> query);
+        QueryResponse<Into> Execute<From, Into>(IQueryDb<From, Into> model, SqlExpression<From> query);
     }
 
     public abstract class AutoQueryServiceBase : Service
     {
-        public IAutoQuery AutoQuery { get; set; }
+        public IAutoQueryDb AutoQuery { get; set; }
 
-        public virtual object Exec<From>(IQuery<From> dto)
+        public virtual object Exec<From>(IQueryDb<From> dto)
         {
             SqlExpression<From> q;
             using (Profiler.Current.Step("AutoQuery.CreateQuery"))
             {
-                q = AutoQuery.CreateQuery(dto, Request.GetRequestParams());
+                q = AutoQuery.CreateQuery(dto, Request.GetRequestParams(), Request);
             }
             using (Profiler.Current.Step("AutoQuery.Execute"))
             {
@@ -244,12 +381,12 @@ namespace ServiceStack
             }
         }
 
-        public virtual object Exec<From, Into>(IQuery<From, Into> dto)
+        public virtual object Exec<From, Into>(IQueryDb<From, Into> dto)
         {
             SqlExpression<From> q;
             using (Profiler.Current.Step("AutoQuery.CreateQuery"))
             {
-                q = AutoQuery.CreateQuery(dto, Request.GetRequestParams());
+                q = AutoQuery.CreateQuery(dto, Request.GetRequestParams(), Request);
             }
             using (Profiler.Current.Step("AutoQuery.Execute"))
             {
@@ -261,29 +398,33 @@ namespace ServiceStack
     public interface IAutoQueryOptions
     {
         int? MaxLimit { get; set; }
+        bool IncludeTotal { get; set; }
         bool EnableUntypedQueries { get; set; }
         bool EnableSqlFilters { get; set; }
         bool OrderByPrimaryKeyOnLimitQuery { get; set; }
         HashSet<string> IgnoreProperties { get; set; }
         HashSet<string> IllegalSqlFragmentTokens { get; set; }
-        Dictionary<string, QueryFieldAttribute> StartsWithConventions { get; set; }
-        Dictionary<string, QueryFieldAttribute> EndsWithConventions { get; set; }
+        Dictionary<string, QueryDbFieldAttribute> StartsWithConventions { get; set; }
+        Dictionary<string, QueryDbFieldAttribute> EndsWithConventions { get; set; }
     }
 
-    public class AutoQuery : IAutoQuery, IAutoQueryOptions, IDisposable
+    public class AutoQuery : IAutoQueryDb, IAutoQueryOptions, IDisposable
     {
         public int? MaxLimit { get; set; }
+        public bool IncludeTotal { get; set; }
         public bool EnableUntypedQueries { get; set; }
         public bool EnableSqlFilters { get; set; }
         public bool OrderByPrimaryKeyOnLimitQuery { get; set; }
         public string RequiredRoleForRawSqlFilters { get; set; }
         public HashSet<string> IgnoreProperties { get; set; }
         public HashSet<string> IllegalSqlFragmentTokens { get; set; }
-        public Dictionary<string, QueryFieldAttribute> StartsWithConventions { get; set; }
-        public Dictionary<string, QueryFieldAttribute> EndsWithConventions { get; set; }
+        public Dictionary<string, QueryDbFieldAttribute> StartsWithConventions { get; set; }
+        public Dictionary<string, QueryDbFieldAttribute> EndsWithConventions { get; set; }
 
+        public string UseNamedConnection { get; set; }
         public virtual IDbConnection Db { get; set; }
         public Dictionary<Type, QueryFilterDelegate> QueryFilters { get; set; }
+        public List<Action<QueryDbFilterContext>> ResponseFilters { get; set; }
 
         public virtual void Dispose()
         {
@@ -314,15 +455,15 @@ namespace ServiceStack
             return defaultValue;
         }
 
-        public SqlExpression<From> Filter<From>(IRequest request, ISqlExpression expr, IQuery model)
+        public SqlExpression<From> Filter<From>(ISqlExpression q, IQueryDb dto, IRequest req)
         {
             if (QueryFilters == null)
-                return (SqlExpression<From>)expr;
+                return (SqlExpression<From>)q;
 
             QueryFilterDelegate filterFn = null;
-            if (!QueryFilters.TryGetValue(model.GetType(), out filterFn))
+            if (!QueryFilters.TryGetValue(dto.GetType(), out filterFn))
             {
-                foreach (var type in model.GetType().GetInterfaces())
+                foreach (var type in dto.GetType().GetInterfaces())
                 {
                     if (QueryFilters.TryGetValue(type, out filterFn))
                         break;
@@ -330,33 +471,103 @@ namespace ServiceStack
             }
 
             if (filterFn != null)
-                return (SqlExpression<From>)(filterFn(request, expr, model) ?? expr);
+                filterFn(q, dto, req);
 
-            return (SqlExpression<From>)expr;
+            return (SqlExpression<From>)q;
         }
 
-        public SqlExpression<From> CreateQuery<From>(IQuery<From> model, Dictionary<string, string> dynamicParams, IRequest request = null)
+        public QueryResponse<Into> ResponseFilter<From, Into>(QueryResponse<Into> response, SqlExpression<From> sqlExpression, IQueryDb dto)
         {
-            var typedQuery = GetTypedQuery(model.GetType(), typeof(From));
-            return Filter<From>(request, typedQuery.CreateQuery(Db, model, dynamicParams, this), model);
+            response.Meta = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+
+            var commands = dto.Include.ParseCommands();
+
+            var ctx = new QueryDbFilterContext
+            {
+                Db = Db,
+                Commands = commands,
+                Dto = dto,
+                SqlExpression = sqlExpression,
+                Response = response,
+            };
+
+            if (IncludeTotal)
+            {
+                var totalCountRequested = commands.Any(x =>
+                    "COUNT".EqualsIgnoreCase(x.Name) &&
+                    (x.Args.Count == 0 || (x.Args.Count == 1 && x.Args[0] == "*")));
+
+                if (!totalCountRequested)
+                    commands.Add(new Command { Name = "COUNT", Args = { "*" } });
+
+                foreach (var responseFilter in ResponseFilters)
+                {
+                    responseFilter(ctx);
+                }
+
+                string total;
+                response.Total = response.Meta.TryGetValue("COUNT(*)", out total)
+                    ? total.ToInt()
+                    : (int)Db.Count(sqlExpression); //fallback if it's not populated (i.e. if stripped by custom ResponseFilter)
+
+                //reduce payload on wire
+                if (!totalCountRequested)
+                {
+                    response.Meta.Remove("COUNT(*)");
+                    if (response.Meta.Count == 0)
+                        response.Meta = null;
+                }
+            }
+            else
+            {
+                foreach (var responseFilter in ResponseFilters)
+                {
+                    responseFilter(ctx);
+                }
+            }
+
+            return response;
         }
 
-        public QueryResponse<From> Execute<From>(IQuery<From> model, SqlExpression<From> query)
+        public IDbConnection GetDb<From>(IRequest req = null)
         {
-            var typedQuery = GetTypedQuery(model.GetType(), typeof(From));
-            return typedQuery.Execute<From>(Db, query);
+            if (Db != null)
+                return Db;
+
+            var namedConnection = UseNamedConnection;
+            var attr = typeof(From).FirstAttribute<NamedConnectionAttribute>();
+            if (attr != null)
+                namedConnection = attr.Name;
+
+            Db = namedConnection == null 
+                ? HostContext.AppHost.GetDbConnection(req)
+                : HostContext.TryResolve<IDbConnectionFactory>().OpenDbConnection(namedConnection);
+
+            return Db;
         }
 
-        public SqlExpression<From> CreateQuery<From, Into>(IQuery<From, Into> model, Dictionary<string, string> dynamicParams, IRequest request = null)
+        public SqlExpression<From> CreateQuery<From>(IQueryDb<From> dto, Dictionary<string, string> dynamicParams, IRequest req = null)
         {
-            var typedQuery = GetTypedQuery(model.GetType(), typeof(From));
-            return Filter<From>(request, typedQuery.CreateQuery(Db, model, dynamicParams, this), model);
+            var typedQuery = GetTypedQuery(dto.GetType(), typeof(From));
+            return Filter<From>(typedQuery.CreateQuery(GetDb<From>(req), dto, dynamicParams, this), dto, req);
         }
 
-        public QueryResponse<Into> Execute<From, Into>(IQuery<From, Into> model, SqlExpression<From> query)
+        public QueryResponse<From> Execute<From>(IQueryDb<From> model, SqlExpression<From> query)
         {
             var typedQuery = GetTypedQuery(model.GetType(), typeof(From));
-            return typedQuery.Execute<Into>(Db, query);
+            return ResponseFilter(typedQuery.Execute<From>(GetDb<From>(), query), query, model);
+        }
+
+        public SqlExpression<From> CreateQuery<From, Into>(IQueryDb<From, Into> dto, Dictionary<string, string> dynamicParams, IRequest req = null)
+        {
+            var typedQuery = GetTypedQuery(dto.GetType(), typeof(From));
+            return Filter<From>(typedQuery.CreateQuery(GetDb<From>(req), dto, dynamicParams, this), dto, req);
+        }
+
+        public QueryResponse<Into> Execute<From, Into>(IQueryDb<From, Into> model, SqlExpression<From> query)
+        {
+            var typedQuery = GetTypedQuery(model.GetType(), typeof(From));
+            return ResponseFilter(typedQuery.Execute<Into>(GetDb<From>(), query), query, model);
         }
     }
 
@@ -364,7 +575,7 @@ namespace ServiceStack
     {
         ISqlExpression CreateQuery(
             IDbConnection db,
-            IQuery model,
+            IQueryDb dto,
             Dictionary<string, string> dynamicParams,
             IAutoQueryOptions options=null);
 
@@ -375,11 +586,13 @@ namespace ServiceStack
 
     public class TypedQuery<QueryModel, From> : ITypedQuery
     {
+        private static ILog log = LogManager.GetLogger(typeof(AutoQueryFeature));
+
         static readonly Dictionary<string, Func<object, object>> PropertyGetters =
             new Dictionary<string, Func<object, object>>();
 
-        static readonly Dictionary<string, QueryFieldAttribute> QueryFieldMap =
-            new Dictionary<string, QueryFieldAttribute>();
+        static readonly Dictionary<string, QueryDbFieldAttribute> QueryFieldMap =
+            new Dictionary<string, QueryDbFieldAttribute>();
 
         static TypedQuery()
         {
@@ -388,7 +601,7 @@ namespace ServiceStack
                 var fn = pi.GetValueGetter(typeof(QueryModel));
                 PropertyGetters[pi.Name] = fn;
 
-                var queryAttr = pi.FirstAttribute<QueryFieldAttribute>();
+                var queryAttr = pi.FirstAttribute<QueryDbFieldAttribute>();
                 if (queryAttr != null)
                     QueryFieldMap[pi.Name] = queryAttr.Init();
             }
@@ -396,7 +609,7 @@ namespace ServiceStack
 
         public ISqlExpression CreateQuery(
             IDbConnection db,
-            IQuery model,
+            IQueryDb dto,
             Dictionary<string, string> dynamicParams,
             IAutoQueryOptions options=null)
         {
@@ -405,21 +618,30 @@ namespace ServiceStack
 
             if (options != null && options.EnableSqlFilters)
             {
-                AppendSqlFilters(q, model, dynamicParams, options);
+                AppendSqlFilters(q, dto, dynamicParams, options);
             }
 
-            AppendJoins(q, model);
+            AppendJoins(q, dto);
 
-            AppendLimits(q, model, options);
+            AppendLimits(q, dto, options);
 
-            var dtoAttr = model.GetType().FirstAttribute<QueryAttribute>();
+            var dtoAttr = dto.GetType().FirstAttribute<QueryDbAttribute>();
             var defaultTerm = dtoAttr != null && dtoAttr.DefaultTerm == QueryTerm.Or ? "OR" : "AND";
 
-            AppendTypedQueries(q, model, dynamicParams, defaultTerm, options);
+            var aliases = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+            var props = typeof(From).GetProperties();
+            foreach (var pi in props)
+            {
+                var attr = pi.FirstAttribute<DataMemberAttribute>();
+                if (attr == null || attr.Name == null) continue;
+                aliases[attr.Name] = pi.Name;
+            }
+
+            AppendTypedQueries(q, dto, dynamicParams, defaultTerm, options, aliases);
 
             if (options != null && options.EnableUntypedQueries)
             {
-                AppendUntypedQueries(q, dynamicParams, defaultTerm, options);
+                AppendUntypedQueries(q, dynamicParams, defaultTerm, options, aliases);
             }
 
             if (defaultTerm == "OR" && q.WhereExpression == null)
@@ -427,10 +649,19 @@ namespace ServiceStack
                 q.Where("1=0"); //Empty OR queries should be empty
             }
 
+            if (!string.IsNullOrEmpty(dto.Fields))
+            {
+                var fields = dto.Fields.Split(',')
+                    .Where(x => x.Trim().Length > 0)
+                    .Map(x => x.Trim());
+
+                q.Select(fields.ToArray());
+            }
+
             return q;
         }
 
-        private void AppendSqlFilters(SqlExpression<From> q, IQuery model, Dictionary<string, string> dynamicParams, IAutoQueryOptions options)
+        private void AppendSqlFilters(SqlExpression<From> q, IQueryDb dto, Dictionary<string, string> dynamicParams, IAutoQueryOptions options)
         {
             string select, from, where;
 
@@ -461,36 +692,36 @@ namespace ServiceStack
 
         private static readonly char[] FieldSeperators = new[] {',', ';'};
 
-        private static void AppendLimits(SqlExpression<From> q, IQuery model, IAutoQueryOptions options)
+        private static void AppendLimits(SqlExpression<From> q, IQueryDb dto, IAutoQueryOptions options)
         {
             var maxLimit = options != null ? options.MaxLimit : null;
-            var take = model.Take ?? maxLimit;
+            var take = dto.Take ?? maxLimit;
             if (take > maxLimit)
                 take = maxLimit;
-            q.Limit(model.Skip, take);
+            q.Limit(dto.Skip, take);
 
-            if (model.OrderBy != null)
+            if (dto.OrderBy != null)
             {
-                var fieldNames = model.OrderBy.Split(FieldSeperators, StringSplitOptions.RemoveEmptyEntries);
+                var fieldNames = dto.OrderBy.Split(FieldSeperators, StringSplitOptions.RemoveEmptyEntries);
                 q.OrderByFields(fieldNames);
             }
-            else if (model.OrderByDesc != null)
+            else if (dto.OrderByDesc != null)
             {
-                var fieldNames = model.OrderByDesc.Split(FieldSeperators, StringSplitOptions.RemoveEmptyEntries);
+                var fieldNames = dto.OrderByDesc.Split(FieldSeperators, StringSplitOptions.RemoveEmptyEntries);
                 q.OrderByFieldsDescending(fieldNames);
             }
-            else if ((model.Skip != null || model.Take != null)
+            else if ((dto.Skip != null || dto.Take != null)
                 && (options != null && options.OrderByPrimaryKeyOnLimitQuery))
             {
                 q.OrderByFields(typeof(From).GetModelMetadata().PrimaryKey);
             }
         }
 
-        private static void AppendJoins(SqlExpression<From> q, IQuery model)
+        private static void AppendJoins(SqlExpression<From> q, IQueryDb dto)
         {
-            if (model is IJoin)
+            if (dto is IJoin)
             {
-                var dtoInterfaces = model.GetType().GetInterfaces();
+                var dtoInterfaces = dto.GetType().GetInterfaces();
                 foreach(var innerJoin in dtoInterfaces.Where(x => x.Name.StartsWith("IJoin`")))
                 {
                     var joinTypes = innerJoin.GetGenericArguments();
@@ -511,20 +742,19 @@ namespace ServiceStack
             }
         }
 
-        private static void AppendTypedQueries(SqlExpression<From> q, IQuery model,
-            Dictionary<string, string> dynamicParams, string defaultTerm, IAutoQueryOptions options)
+        private static void AppendTypedQueries(SqlExpression<From> q, IQueryDb dto, Dictionary<string, string> dynamicParams, string defaultTerm, IAutoQueryOptions options, Dictionary<string, string> aliases)
         {
             foreach (var entry in PropertyGetters)
             {
-                var name = entry.Key;
+                var name = entry.Key.LeftPart('#');
 
-                QueryFieldAttribute implicitQuery;
+                QueryDbFieldAttribute implicitQuery;
                 QueryFieldMap.TryGetValue(name, out implicitQuery);
 
                 if (implicitQuery != null && implicitQuery.Field != null)
                     name = implicitQuery.Field;
 
-                var match = GetQueryMatch(q, name, options);
+                var match = GetQueryMatch(q, name, options, aliases);
                 if (match == null)
                     continue;
 
@@ -532,7 +762,7 @@ namespace ServiceStack
                     implicitQuery = match.ImplicitQuery;
                 var quotedColumn = q.DialectProvider.GetQuotedColumnName(match.ModelDef, match.FieldDef);
 
-                var value = entry.Value(model);
+                var value = entry.Value(dto);
                 if (value == null)
                     continue;
 
@@ -542,13 +772,13 @@ namespace ServiceStack
             }
         }
 
-        private static void AddCondition(SqlExpression<From> q, string defaultTerm, string quotedColumn, object value, QueryFieldAttribute implicitQuery)
+        private static void AddCondition(SqlExpression<From> q, string defaultTerm, string quotedColumn, object value, QueryDbFieldAttribute implicitQuery)
         {
             var seq = value as IEnumerable;
             if (value is string)
                 seq = null;
             var format = seq == null 
-                ? quotedColumn + " = {0}"
+                ? (value != null ? quotedColumn + " = {0}" : quotedColumn + " IS NULL")
                 : quotedColumn + " IN ({0})";
             if (implicitQuery != null)
             {
@@ -558,7 +788,7 @@ namespace ServiceStack
                 else if (implicitQuery.Term == QueryTerm.And)
                     defaultTerm = "AND";
 
-                format = quotedColumn + " " + operand + " {0}";
+                format = "(" + quotedColumn + " " + operand + " {0}" + ")";
                 if (implicitQuery.Template != null)
                 {
                     format = implicitQuery.Template.Replace("{Field}", quotedColumn);
@@ -609,31 +839,33 @@ namespace ServiceStack
             q.AddCondition(defaultTerm, format, value);
         }
 
-        private static void AppendUntypedQueries(SqlExpression<From> q, Dictionary<string, string> dynamicParams, string defaultTerm, IAutoQueryOptions options)
+        private static void AppendUntypedQueries(SqlExpression<From> q, Dictionary<string, string> dynamicParams, string defaultTerm, IAutoQueryOptions options, Dictionary<string, string> aliases)
         {
             foreach (var entry in dynamicParams)
             {
-                var name = entry.Key;
+                var name = entry.Key.LeftPart('#');
 
-                var match = GetQueryMatch(q, name, options);
+                var match = GetQueryMatch(q, name, options, aliases);
                 if (match == null)
                     continue;
 
                 var implicitQuery = match.ImplicitQuery;
                 var quotedColumn = q.DialectProvider.GetQuotedColumnName(match.ModelDef, match.FieldDef);
 
-                var strValue = entry.Value;
+                var strValue = !string.IsNullOrEmpty(entry.Value)
+                    ? entry.Value
+                    : null;
                 var fieldType = match.FieldDef.FieldType;
                 var isMultiple = (implicitQuery != null && (implicitQuery.ValueStyle > ValueStyle.Single))
                     || string.Compare(name, match.FieldDef.Name + Pluralized, StringComparison.OrdinalIgnoreCase) == 0;
                 
-                var value = isMultiple ? 
-                    TypeSerializer.DeserializeFromString(strValue, Array.CreateInstance(fieldType, 0).GetType())
+                var value = strValue == null ? 
+                      null 
+                    : isMultiple ? 
+                      TypeSerializer.DeserializeFromString(strValue, Array.CreateInstance(fieldType, 0).GetType())
                     : fieldType == typeof(string) ? 
                       strValue
-                    : fieldType.IsValueType ? 
-                      Convert.ChangeType(strValue, fieldType) :
-                      TypeSerializer.DeserializeFromString(strValue, fieldType);
+                    : strValue.ChangeTo(fieldType);
 
                 AddCondition(q, defaultTerm, quotedColumn, value, implicitQuery);
             }
@@ -641,7 +873,7 @@ namespace ServiceStack
 
         class MatchQuery
         {
-            public MatchQuery(Tuple<ModelDefinition,FieldDefinition> match, QueryFieldAttribute implicitQuery)
+            public MatchQuery(Tuple<ModelDefinition,FieldDefinition> match, QueryDbFieldAttribute implicitQuery)
             {
                 ModelDef = match.Item1;
                 FieldDef = match.Item2;
@@ -649,10 +881,27 @@ namespace ServiceStack
             }
             public readonly ModelDefinition ModelDef;
             public readonly FieldDefinition FieldDef;
-            public readonly QueryFieldAttribute ImplicitQuery;
+            public readonly QueryDbFieldAttribute ImplicitQuery;
         }
 
         private const string Pluralized = "s";
+
+        private static MatchQuery GetQueryMatch(SqlExpression<From> q, string name, IAutoQueryOptions options, Dictionary<string,string> aliases)
+        {
+            var match = GetQueryMatch(q, name, options);
+
+            if (match == null)
+            {
+                string alias;
+                if (aliases.TryGetValue(name, out alias))
+                    match = GetQueryMatch(q, alias, options);
+
+                if (match == null && JsConfig.EmitLowercaseUnderscoreNames && name.Contains("_"))
+                    match = GetQueryMatch(q, name.Replace("_", ""), options);
+            }
+
+            return match;
+        }
 
         private static MatchQuery GetQueryMatch(SqlExpression<From> q, string name, IAutoQueryOptions options)
         {
@@ -701,22 +950,21 @@ namespace ServiceStack
                 var response = new QueryResponse<Into>
                 {
                     Offset = q.Offset.GetValueOrDefault(0),
-                    Total = (int)db.Count(q),
-                    Results = db.LoadSelect<Into, From>(q),
+                    Results = db.LoadSelect<Into, From>(q, include:q.OnlyFields),
                 };
 
                 return response;
             }
             catch (Exception ex)
             {
-                throw new ArgumentException(ex.Message);
+                throw new ArgumentException(ex.Message, ex);
             }
         }
     }
 
     public static class AutoQueryExtensions
     {
-        public static QueryFieldAttribute Init(this QueryFieldAttribute query)
+        public static QueryDbFieldAttribute Init(this QueryDbFieldAttribute query)
         {
             query.ValueStyle = ValueStyle.Single;
             if (query.Template == null || query.ValueFormat != null) return query;
@@ -735,6 +983,16 @@ namespace ServiceStack
                     : ValueStyle.List;
             }
             return query;
+        }
+
+        public static SqlExpression<From> CreateQuery<From>(this IAutoQueryDb autoQuery, IQueryDb<From> model, IRequest request)
+        {
+            return autoQuery.CreateQuery(model, request.GetRequestParams(), request);
+        }
+
+        public static SqlExpression<From> CreateQuery<From, Into>(this IAutoQueryDb autoQuery, IQueryDb<From, Into> model, IRequest request)
+        {
+            return autoQuery.CreateQuery(model, request.GetRequestParams(), request);
         }
     }
 }

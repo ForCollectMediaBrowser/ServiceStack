@@ -5,7 +5,7 @@
 // Authors:
 //   Demis Bellot (demis.bellot@gmail.com)
 //
-// Copyright 2014 Service Stack LLC. All Rights Reserved.
+// Copyright 2016 Service Stack LLC. All Rights Reserved.
 //
 // Licensed under the same terms of ServiceStack.
 //
@@ -59,6 +59,7 @@ namespace ServiceStack.Redis
 
         //Common key-value Redis operations
         byte[][] Keys(string pattern);
+        string Type(string key);
         long Exists(string key);
         long StrLen(string key);
         void Set(string key, byte[] value);
@@ -142,6 +143,7 @@ namespace ServiceStack.Redis
         long SAdd(string setId, byte[][] value);
         long SRem(string setId, byte[] value);
         byte[] SPop(string setId);
+        byte[][] SPop(string setId, int count);
         void SMove(string fromSetId, string toSetId, byte[] value);
         long SCard(string setId);
         long SIsMember(string setId, byte[] value);
@@ -158,6 +160,7 @@ namespace ServiceStack.Redis
         long ZAdd(string setId, double score, byte[] value);
         long ZAdd(string setId, long score, byte[] value);
         long ZRem(string setId, byte[] value);
+        long ZRem(string setId, byte[][] values);
         double ZIncrBy(string setId, double incrBy, byte[] value);
         double ZIncrBy(string setId, long incrBy, byte[] value);
         long ZRank(string setId, byte[] value);
@@ -200,6 +203,17 @@ namespace ServiceStack.Redis
         byte[][] HVals(string hashId);
         byte[][] HGetAll(string hashId);
 
+        //Redis GEO operations
+        long GeoAdd(string key, double longitude, double latitude, string member);
+        long GeoAdd(string key, params RedisGeo[] geoPoints);
+        double GeoDist(string key, string fromMember, string toMember, string unit = null);
+        string[] GeoHash(string key, params string[] members);
+        List<RedisGeo> GeoPos(string key, params string[] members);
+        List<RedisGeoResult> GeoRadius(string key, double longitude, double latitude, double radius, string unit,
+            bool withCoords = false, bool withDist = false, bool withHash = false, int? count = null, bool? asc = null);
+        List<RedisGeoResult> GeoRadiusByMember(string key, string member, double radius, string unit,
+            bool withCoords = false, bool withDist = false, bool withHash = false, int? count = null, bool? asc = null);
+
         //Redis Pub/Sub operations
         void Watch(params string[] keys);
         void UnWatch();
@@ -212,12 +226,16 @@ namespace ServiceStack.Redis
         IRedisSubscription CreateSubscription();
 
         //Redis LUA support
+        RedisData EvalCommand(string luaBody, int numberKeysInArgs, params byte[][] keys);
+        RedisData EvalShaCommand(string sha1, int numberKeysInArgs, params byte[][] keys);
+
+        byte[][] Eval(string luaBody, int numberOfKeys, params byte[][] keysAndArgs);
+        byte[][] EvalSha(string sha1, int numberOfKeys, params byte[][] keysAndArgs);
+
         long EvalInt(string luaBody, int numberOfKeys, params byte[][] keysAndArgs);
         long EvalShaInt(string sha1, int numberOfKeys, params byte[][] keysAndArgs);
         string EvalStr(string luaBody, int numberOfKeys, params byte[][] keysAndArgs);
         string EvalShaStr(string sha1, int numberOfKeys, params byte[][] keysAndArgs);
-        byte[][] Eval(string luaBody, int numberOfKeys, params byte[][] keysAndArgs);
-        byte[][] EvalSha(string sha1, int numberOfKeys, params byte[][] keysAndArgs);
 
         string CalculateSha1(string luaBody);
         byte[][] ScriptExists(params byte[][] sha1Refs);

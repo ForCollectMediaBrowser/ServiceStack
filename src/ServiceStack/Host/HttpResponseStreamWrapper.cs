@@ -10,10 +10,12 @@ namespace ServiceStack.Host
     {
         private static readonly UTF8Encoding UTF8EncodingWithoutBom = new UTF8Encoding(false);
 
-        public HttpResponseStreamWrapper(Stream stream)
+        public HttpResponseStreamWrapper(Stream stream, IRequest request)
         {
             this.OutputStream = stream;
+            this.Request = request;
             this.Headers = new Dictionary<string, string>();
+            this.Items = new Dictionary<string, object>();
         }
 
         public Dictionary<string, string> Headers { get; set; }
@@ -23,16 +25,24 @@ namespace ServiceStack.Host
             get { return null; }
         }
 
+        public IRequest Request { get; private set; }
+
         public int StatusCode { set; get; }
         public string StatusDescription { set; get; }
         public string ContentType { get; set; }
         public bool KeepOpen { get; set; }
-
         public ICookies Cookies { get; set; }
 
         public void AddHeader(string name, string value)
         {
             this.Headers[name] = value;
+        }
+
+        public string GetHeader(string name)
+        {
+            string value;
+            this.Headers.TryGetValue(name, out value);
+            return value;
         }
 
         public void Redirect(string url)
@@ -82,7 +92,13 @@ namespace ServiceStack.Host
 
         public bool KeepAlive { get; set; }
 
+        public Dictionary<string, object> Items { get; private set; }
+
         public void SetCookie(Cookie cookie)
+        {
+        }
+
+        public void ClearCookies()
         {
         }
     }

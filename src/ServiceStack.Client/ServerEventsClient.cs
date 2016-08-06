@@ -1,8 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.Contracts;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +12,7 @@ using ServiceStack.Text;
 
 namespace ServiceStack
 {
-    public class ServerEventConnect : ServerEventJoin
+    public class ServerEventConnect : ServerEventCommand
     {
         public string Id { get; set; }
         public string UnRegisterUrl { get; set; }
@@ -20,26 +21,42 @@ namespace ServiceStack
         public long IdleTimeoutMs { get; set; }
     }
 
-    public class ServerEventJoin : ServerEventCommand
+    public class ServerEventJoin : ServerEventCommand { }
+
+    public class ServerEventLeave : ServerEventCommand { }
+
+    public class ServerEventUpdate : ServerEventCommand { }
+
+    public class ServerEventHeartbeat : ServerEventCommand { }
+
+    public class ServerEventCommand : ServerEventMessage
     {
         public string UserId { get; set; }
         public string DisplayName { get; set; }
         public string ProfileUrl { get; set; }
+        public string[] Channels { get; set; }
     }
-
-    public class ServerEventLeave : ServerEventCommand {}
-
-    public class ServerEventCommand : ServerEventMessage { }
 
     public class ServerEventMessage : IMeta
     {
         public long EventId { get; set; }
+        public string Channel { get; set; }
         public string Data { get; set; }
         public string Selector { get; set; }
         public string Json { get; set; }
         public string Op { get; set; }
         public string Target { get; set; }
         public string CssSelector { get; set; }
+
+        public Dictionary<string, string> Meta { get; set; }
+    }
+
+    public class ServerEventUser : IMeta
+    {
+        public string UserId { get; set; }
+        public string DisplayName { get; set; }
+        public string ProfileUrl { get; set; }
+        public string[] Channels { get; set; }
 
         public Dictionary<string, string> Meta { get; set; }
     }
@@ -51,6 +68,11 @@ namespace ServiceStack
         public static int BufferSize = 1024 * 64;
         static int DefaultHeartbeatMs = 10 * 1000;
         static int DefaultIdleTimeoutMs = 30 * 1000;
+        private bool stopped = true;
+        public bool IsStopped
+        {
+            get { return stopped; }
+        }
 
         byte[] buffer;
         Encoding encoding = new UTF8Encoding();
@@ -67,8 +89,52 @@ namespace ServiceStack
             get { return ConnectionInfo != null ? ConnectionInfo.Id : null; }
         }
 
-        public string EventStreamUri { get; set; }
-        public string Channel { get; set; }
+        public string ConnectionDisplayName
+        {
+            get { return ConnectionInfo != null ? ConnectionInfo.DisplayName : "(not connected)"; }
+        }
+
+        private string eventStreamPath;
+        public string EventStreamUri { get; private set; }
+
+        public string BaseUri
+        {
+            get
+            {
+                var meta = this.ServiceClient as IServiceClientMeta;
+                return meta != null ? meta.BaseUri : null;
+            }
+            set
+            {
+                this.eventStreamPath = value.CombineWith("event-stream");
+                BuildEventStreamUri();
+
+                var meta = this.ServiceClient as IServiceClientMeta;
+                if (meta != null)
+                    meta.BaseUri = value;
+            }
+        }
+
+        private string[] channels;
+        public string[] Channels
+        {
+            get { return channels; }
+            set
+            {
+                if (value == null)
+                    throw new ArgumentNullException("channels");
+
+                this.channels = value;
+                BuildEventStreamUri();
+            }
+        }
+
+        private void BuildEventStreamUri()
+        {
+            this.EventStreamUri = this.eventStreamPath
+                .AddQueryParam("channels", string.Join(",", this.channels));
+        }
+
         public IServiceClient ServiceClient { get; set; }
         public DateTime LastPulseAt { get; set; }
 
@@ -79,24 +145,12 @@ namespace ServiceStack
         public Action<Exception> OnException;
 
         public Action<WebRequest> EventStreamRequestFilter { get; set; }
-        public Action<WebRequest> HeartbeatRequestFilter { get; set; } 
+        public Action<WebRequest> HeartbeatRequestFilter { get; set; }
 
-        public static readonly Task<object> EmptyTask;
-
-        static ServerEventsClient()
+        public ServerEventsClient(string baseUri, params string[] channels)
         {
-            var tcs = new TaskCompletionSource<object>();
-            tcs.SetResult(null);
-            EmptyTask = tcs.Task;
-        }
-
-        public ServerEventsClient(string baseUri, string channel=null)
-        {
-            this.EventStreamUri = baseUri.CombineWith("event-stream");
-            this.Channel = channel;
-
-            if (Channel != null)
-                this.EventStreamUri = this.EventStreamUri.AddQueryParam("channel", Channel);
+            this.eventStreamPath = baseUri.CombineWith("event-stream");
+            this.Channels = channels;
 
             this.ServiceClient = new JsonServiceClient(baseUri);
 
@@ -111,8 +165,10 @@ namespace ServiceStack
             if (log.IsDebugEnabled)
                 log.DebugFormat("Start()");
 
+            stopped = false;
             httpReq = (HttpWebRequest)WebRequest.Create(EventStreamUri);
-            httpReq.CookieContainer = ((ServiceClientBase)ServiceClient).CookieContainer; //share auth cookies
+            //share auth cookies
+            httpReq.CookieContainer = ((IHasCookieContainer)ServiceClient).CookieContainer;
             //httpReq.AllowReadStreamBuffering = false; //.NET v4.5
 
             if (EventStreamRequestFilter != null)
@@ -129,10 +185,14 @@ namespace ServiceStack
                 connectTcs = new TaskCompletionSource<ServerEventConnect>();
             if (commandTcs == null || commandTcs.Task.IsCompleted)
                 commandTcs = new TaskCompletionSource<ServerEventCommand>();
+            if (heartbeatTcs == null || heartbeatTcs.Task.IsCompleted)
+                heartbeatTcs = new TaskCompletionSource<ServerEventHeartbeat>();
             if (messageTcs == null || messageTcs.Task.IsCompleted)
                 messageTcs = new TaskCompletionSource<ServerEventMessage>();
 
             LastPulseAt = DateTime.UtcNow;
+            if (log.IsDebugEnabled)
+                log.Debug("[SSE-CLIENT] LastPulseAt: " + DateTime.UtcNow.TimeOfDay);
 
             ProcessResponse(stream);
 
@@ -145,29 +205,34 @@ namespace ServiceStack
             if (httpReq == null)
                 Start();
 
-            Contract.Assert(!connectTcs.Task.IsCompleted);
             return connectTcs.Task;
         }
 
         private TaskCompletionSource<ServerEventCommand> commandTcs;
         public Task<ServerEventCommand> WaitForNextCommand()
         {
-            Contract.Assert(!commandTcs.Task.IsCompleted);
             return commandTcs.Task;
+        }
+
+        private TaskCompletionSource<ServerEventHeartbeat> heartbeatTcs;
+        public Task<ServerEventHeartbeat> WaitForNextHeartbeat()
+        {
+            return heartbeatTcs.Task;
         }
 
         private TaskCompletionSource<ServerEventMessage> messageTcs;
         public Task<ServerEventMessage> WaitForNextMessage()
         {
-            Contract.Assert(!messageTcs.Task.IsCompleted);
             return messageTcs.Task;
         }
-
+        
         protected void OnConnectReceived()
         {
             if (log.IsDebugEnabled)
-                log.DebugFormat("OnConnectReceived: {0} on #{1} / {2}", 
-                    ConnectionInfo.EventId, ConnectionInfo.DisplayName, ConnectionInfo.Id);
+                log.DebugFormat("[SSE-CLIENT] OnConnectReceived: {0} on #{1} / {2} on ({3})",
+                    ConnectionInfo.EventId, ConnectionDisplayName, ConnectionInfo.Id, string.Join(", ", Channels));
+
+            StartNewHeartbeat();
 
             var hold = connectTcs;
             connectTcs = new TaskCompletionSource<ServerEventConnect>();
@@ -175,14 +240,12 @@ namespace ServiceStack
             if (OnConnect != null)
                 OnConnect(ConnectionInfo);
 
-            hold.SetResult(ConnectionInfo);
-
-            StartNewHeartbeat();
+            hold.SetResult(ConnectionInfo); //needs to be at end or control yielded before Heartbeat can start
         }
 
-        private void StartNewHeartbeat()
+        protected void StartNewHeartbeat()
         {
-            if (string.IsNullOrEmpty(ConnectionInfo.HeartbeatUrl)) 
+            if (ConnectionInfo == null || string.IsNullOrEmpty(ConnectionInfo.HeartbeatUrl))
                 return;
 
             if (heartbeatTimer != null)
@@ -194,7 +257,13 @@ namespace ServiceStack
 
         protected void Heartbeat(object state)
         {
+            if (log.IsDebugEnabled)
+                log.DebugFormat("[SSE-CLIENT] Prep for Heartbeat...");
+
             if (cancel.IsCancellationRequested)
+                return;
+
+            if (ConnectionInfo == null)
                 return;
 
             var elapsedMs = (DateTime.UtcNow - LastPulseAt).TotalMilliseconds;
@@ -206,22 +275,32 @@ namespace ServiceStack
 
             EnsureSynchronizationContext();
 
-            ConnectionInfo.HeartbeatUrl.GetStringFromUrlAsync(requestFilter:HeartbeatRequestFilter)
-                .Success(t => {
+            ConnectionInfo.HeartbeatUrl.GetStringFromUrlAsync(requestFilter: req =>
+            {
+                    var hold = httpReq;
+                    if (hold != null)
+                        req.CookieContainer = hold.CookieContainer;
+
+                    if (HeartbeatRequestFilter != null)
+                        HeartbeatRequestFilter(req);
+                })
+                .Success(t =>
+                {
                     if (cancel.IsCancellationRequested)
                         return;
 
                     if (log.IsDebugEnabled)
-                        log.DebugFormat("Heartbeat sent to: " + ConnectionInfo.HeartbeatUrl);
+                        log.DebugFormat("[SSE-CLIENT] Heartbeat sent to: " + ConnectionInfo.HeartbeatUrl);
 
                     StartNewHeartbeat();
                 })
-                .Error(ex => {
+                .Error(ex =>
+                {
                     if (cancel.IsCancellationRequested)
                         return;
 
                     if (log.IsDebugEnabled)
-                        log.DebugFormat("Error from Heartbeat: {0}", ex.UnwrapIfSingleException().Message);
+                        log.DebugFormat("[SSE-CLIENT] Error from Heartbeat: {0}", ex.UnwrapIfSingleException().Message);
                     OnExceptionReceived(ex);
                 });
         }
@@ -229,10 +308,10 @@ namespace ServiceStack
         private static void EnsureSynchronizationContext()
         {
             if (SynchronizationContext.Current != null) return;
-            
+
             //Unit test runner
-            if (log.IsDebugEnabled)
-                log.DebugFormat("SynchronizationContext.Current == null");
+            //if (log.IsDebugEnabled)
+            //    log.DebugFormat("[SSE-CLIENT] SynchronizationContext.Current == null");
 
             SynchronizationContext.SetSynchronizationContext(new SynchronizationContext());
         }
@@ -240,7 +319,7 @@ namespace ServiceStack
         protected void OnCommandReceived(ServerEventCommand e)
         {
             if (log.IsDebugEnabled)
-                log.DebugFormat("OnCommandReceived: {0} on #{1}", e.EventId, ConnectionInfo.DisplayName);
+                log.DebugFormat("[SSE-CLIENT] OnCommandReceived: ({0}) #{1} on #{2} ({3})", e.GetType().Name, e.EventId, ConnectionDisplayName, string.Join(", ", Channels));
 
             var hold = commandTcs;
             commandTcs = new TaskCompletionSource<ServerEventCommand>();
@@ -251,10 +330,24 @@ namespace ServiceStack
             hold.SetResult(e);
         }
 
+        protected void OnHeartbeatReceived(ServerEventHeartbeat e)
+        {
+            if (log.IsDebugEnabled)
+                log.DebugFormat("[SSE-CLIENT] OnHeartbeatReceived: ({0}) #{1} on #{2} ({3})", e.GetType().Name, e.EventId, ConnectionDisplayName, string.Join(", ", Channels));
+
+            var hold = heartbeatTcs;
+            heartbeatTcs = new TaskCompletionSource<ServerEventHeartbeat>();
+
+            if (OnHeartbeat != null)
+                OnHeartbeat();
+
+            hold.SetResult(e);
+        }
+
         protected void OnMessageReceived(ServerEventMessage e)
         {
             if (log.IsDebugEnabled)
-                log.DebugFormat("OnMessageReceived: {0} on #{1}", e.EventId, ConnectionInfo.DisplayName);
+                log.DebugFormat("[SSE-CLIENT] OnMessageReceived: {0} on #{1} ({2})", e.EventId, ConnectionDisplayName, string.Join(", ", Channels));
 
             var hold = messageTcs;
             messageTcs = new TaskCompletionSource<ServerEventMessage>();
@@ -271,7 +364,7 @@ namespace ServiceStack
             errorsCount++;
 
             ex = ex.UnwrapIfSingleException();
-            log.Error("OnExceptionReceived: {0} on #{1}".Fmt(ex.Message, ConnectionInfo.DisplayName), ex);
+            log.Error("[SSE-CLIENT] OnExceptionReceived: {0} on #{1}".Fmt(ex.Message, ConnectionDisplayName), ex);
 
             if (OnException != null)
                 OnException(ex);
@@ -279,26 +372,41 @@ namespace ServiceStack
             Restart();
         }
 
-        private void Restart()
+        public void Restart()
         {
             try
             {
-                Stop();
+                InternalStop();
+
+                if (stopped)
+                    return;
+
                 SleepBackOffMultiplier(errorsCount)
                     .ContinueWith(t =>
-                        Start());
+                    {
+                        if (stopped)
+                            return;
+                        try
+                        {
+                            Start();
+                        }
+                        catch (Exception ex)
+                        {
+                            OnExceptionReceived(ex);
+                        }
+                    });
             }
             catch (Exception ex)
             {
-                log.Error("Error whilst restarting: {0}".Fmt(ex.Message), ex);
+                log.Error("[SSE-CLIENT] Error whilst restarting: {0}".Fmt(ex.Message), ex);
             }
         }
 
         readonly Random rand = new Random(Environment.TickCount);
         private Task SleepBackOffMultiplier(int continuousErrorsCount)
         {
-            if (continuousErrorsCount <= 1) 
-                return EmptyTask;
+            if (continuousErrorsCount <= 1)
+                return TypeConstants.EmptyTask;
 
             const int MaxSleepMs = 60 * 1000;
 
@@ -318,7 +426,7 @@ namespace ServiceStack
         {
             if (!stream.CanRead) return;
 
-            var task = stream.ReadAsync(buffer, 0, 2048, cancel.Token);
+            var task = stream.ReadAsync(buffer, 0, BufferSize, cancel.Token);
             task.ContinueWith(t =>
             {
                 if (cancel.IsCancellationRequested || t.IsCanceled)
@@ -343,16 +451,23 @@ namespace ServiceStack
                     int pos;
                     while ((pos = text.IndexOf('\n')) >= 0)
                     {
-                        if (text == "\n")
+                        if (pos == 0)
                         {
-                            ProcessEventMessage(currentMsg);
+                            if (currentMsg != null)
+                                ProcessEventMessage(currentMsg);
                             currentMsg = null;
-                            text = "";
+
+                            text = text.Substring(pos + 1);
+
+                            if (text.Length > 0)
+                                continue;
+
                             break;
                         }
 
                         var line = text.Substring(0, pos);
-                        ProcessLine(line);
+                        if (!string.IsNullOrWhiteSpace(line))
+                            ProcessLine(line);
                         if (text.Length > pos + 1)
                             text = text.Substring(pos + 1);
                     }
@@ -364,8 +479,9 @@ namespace ServiceStack
                 else
                 {
                     if (log.IsDebugEnabled)
-                        log.DebugFormat("Connection ended on {0}", 
-                            ConnectionInfo != null ? ConnectionInfo.DisplayName : null);
+                        log.DebugFormat("Connection ended on {0}", ConnectionDisplayName);
+
+                    Restart();
                 }
             });
         }
@@ -399,11 +515,21 @@ namespace ServiceStack
         {
             var parts = e.Data.SplitOnFirst(' ');
             e.Selector = parts[0];
+            var selParts = e.Selector.SplitOnFirst('@');
+            if (selParts.Length > 1)
+            {
+                e.Channel = selParts[0];
+                e.Selector = selParts[1];
+            }
+
             e.Json = parts[1];
 
             if (!string.IsNullOrEmpty(e.Selector))
             {
                 parts = e.Selector.SplitOnFirst('.');
+                if (parts.Length < 2)
+                    throw new ArgumentException("Invalid Selector '{0}'".Fmt(e.Selector));
+
                 e.Op = parts[0];
                 var target = parts[1].Replace("%20", " ");
 
@@ -424,6 +550,9 @@ namespace ServiceStack
                             return;
                         case "onLeave":
                             ProcessOnLeaveMessage(e);
+                            return;
+                        case "onUpdate":
+                            ProcessOnUpdateMessage(e);
                             return;
                         case "onHeartbeat":
                             ProcessOnHeartbeatMessage(e);
@@ -451,8 +580,9 @@ namespace ServiceStack
 
         private void ProcessOnConnectMessage(ServerEventMessage e)
         {
-            var msg = JsonObject.Parse(e.Json);
-            ConnectionInfo = new ServerEventConnect {
+            var msg = JsonServiceClient.ParseObject(e.Json);
+            ConnectionInfo = new ServerEventConnect
+            {
                 HeartbeatIntervalMs = DefaultHeartbeatMs,
                 IdleTimeoutMs = DefaultIdleTimeoutMs,
             }.Populate(e, msg);
@@ -471,36 +601,41 @@ namespace ServiceStack
 
         private void ProcessOnJoinMessage(ServerEventMessage e)
         {
-            var msg = JsonObject.Parse(e.Json);
-            var joinMsg = new ServerEventJoin().Populate(e, msg);
-            joinMsg.UserId = msg.Get("userId");
-            joinMsg.DisplayName = msg.Get("displayName");
-            joinMsg.ProfileUrl = msg.Get("profileUrl");
-
-            OnCommandReceived(joinMsg);
+            var msg = new ServerEventJoin().Populate(e, JsonServiceClient.ParseObject(e.Json));
+            OnCommandReceived(msg);
         }
 
         private void ProcessOnLeaveMessage(ServerEventMessage e)
         {
-            var msg = JsonObject.Parse(e.Json);
-            var leaveMsg = new ServerEventLeave().Populate(e, msg);
+            var msg = new ServerEventLeave().Populate(e, JsonServiceClient.ParseObject(e.Json));
+            OnCommandReceived(msg);
+        }
 
-            OnCommandReceived(leaveMsg);
+        private void ProcessOnUpdateMessage(ServerEventMessage e)
+        {
+            var msg = new ServerEventUpdate().Populate(e, JsonServiceClient.ParseObject(e.Json));
+            OnCommandReceived(msg);
         }
 
         private void ProcessOnHeartbeatMessage(ServerEventMessage e)
         {
             LastPulseAt = DateTime.UtcNow;
-            var msg = JsonObject.Parse(e.Json);
-            var heartbeatMsg = new ServerEventLeave().Populate(e, msg);
+            if (log.IsDebugEnabled)
+                log.Debug("[SSE-CLIENT] LastPulseAt: " + DateTime.UtcNow.TimeOfDay);
 
-            if (OnHeartbeat != null)
-                OnHeartbeat();
+            var msg = JsonServiceClient.ParseObject(e.Json);
+            var heartbeatMsg = new ServerEventHeartbeat().Populate(e, msg);
 
-            OnCommandReceived(heartbeatMsg);
+            OnHeartbeatReceived(heartbeatMsg);
         }
 
-        public virtual void Stop()
+        public virtual Task Stop()
+        {
+            stopped = true;
+            return InternalStop();
+        }
+
+        public virtual Task InternalStop()
         {
             if (log.IsDebugEnabled)
                 log.DebugFormat("Stop()");
@@ -508,11 +643,13 @@ namespace ServiceStack
             if (cancel != null)
                 cancel.Cancel();
 
+            Task task = TypeConstants.EmptyTask;
+
             if (ConnectionInfo != null && ConnectionInfo.UnRegisterUrl != null)
             {
                 EnsureSynchronizationContext();
-                ConnectionInfo.UnRegisterUrl.GetStringFromUrlAsync()
-                    .Error(ex => { /*ignore*/});
+                task = ConnectionInfo.UnRegisterUrl.GetStringFromUrlAsync();
+                task.Error(ex => { /*ignore*/});
             }
 
             using (response)
@@ -522,6 +659,25 @@ namespace ServiceStack
 
             ConnectionInfo = null;
             httpReq = null;
+
+            return task;
+        }
+
+        public void Update(string[] subscribe = null, string[] unsubscribe = null)
+        {
+            var snapshot = this.Channels.ToList();
+            if (subscribe != null)
+            {
+                foreach (var channel in subscribe)
+                {
+                    snapshot.AddIfNotExists(channel);
+                }
+            }
+            if (unsubscribe != null)
+            {
+                snapshot.RemoveAll(unsubscribe.Contains);
+            }
+            this.Channels = snapshot.ToArray();
         }
 
         public void Dispose()
@@ -546,20 +702,128 @@ namespace ServiceStack
             return client.ServiceClient.PostAsync(request);
         }
 
-        public static T Populate<T>(this T dst, ServerEventMessage src, JsonObject msg) where T : ServerEventMessage
+        public static void UpdateSubscriber(this ServerEventsClient client, UpdateEventSubscriber request)
+        {
+            if (request.Id == null)
+                request.Id = client.ConnectionInfo.Id;
+            client.ServiceClient.Post(request);
+
+            client.Update(subscribe:request.SubscribeChannels, unsubscribe:request.UnsubscribeChannels);
+        }
+
+        public static Task UpdateSubscriberAsync(this ServerEventsClient client, UpdateEventSubscriber request)
+        {
+            if (request.Id == null)
+                request.Id = client.ConnectionInfo.Id;
+            return client.ServiceClient.PostAsync(request)
+                .Then(x => {
+                    client.Update(subscribe:request.SubscribeChannels, unsubscribe:request.UnsubscribeChannels);
+                    return null;
+                });
+        }
+
+        public static void SubscribeToChannels(this ServerEventsClient client, params string[] channels)
+        {
+            client.ServiceClient.Post(new UpdateEventSubscriber { Id = client.ConnectionInfo.Id, SubscribeChannels = channels.ToArray() });
+            client.Update(subscribe:channels);
+        }
+
+        public static Task SubscribeToChannelsAsync(this ServerEventsClient client, params string[] channels)
+        {
+            return client.ServiceClient.PostAsync(new UpdateEventSubscriber { Id = client.ConnectionInfo.Id, SubscribeChannels = channels.ToArray() })
+                .Then(x => {
+                    client.Update(subscribe:channels);
+                    return null;
+                });
+        }
+
+        public static void UnsubscribeFromChannels(this ServerEventsClient client, params string[] channels)
+        {
+            client.ServiceClient.Post(new UpdateEventSubscriber { Id = client.ConnectionInfo.Id, UnsubscribeChannels = channels.ToArray() });
+            client.Update(unsubscribe:channels);
+        }
+
+        public static Task UnsubscribeFromChannelsAsync(this ServerEventsClient client, params string[] channels)
+        {
+            return client.ServiceClient.PostAsync(new UpdateEventSubscriber { Id = client.ConnectionInfo.Id, UnsubscribeChannels = channels.ToArray() })
+                .Then(x => {
+                    client.Update(unsubscribe:channels);
+                    return null;
+                });
+        }
+
+        public static List<ServerEventUser> GetChannelSubscribers(this ServerEventsClient client)
+        {
+            var response = client.ServiceClient.Get(new GetEventSubscribers { Channels = client.Channels });
+            return response.ConvertAll(x => x.ToServerEventUser());
+        }
+
+        public static Task<List<ServerEventUser>> GetChannelSubscribersAsync(this ServerEventsClient client)
+        {
+            var responseTask = client.ServiceClient.GetAsync(new GetEventSubscribers { Channels = client.Channels });
+            return responseTask.ContinueWith(task => task.Result.ConvertAll(x => x.ToServerEventUser()));
+        }
+
+        internal static ServerEventUser ToServerEventUser(this Dictionary<string, string> map)
+        {
+            var channels = map.Get("channels");
+            var to = new ServerEventUser
+            {
+                UserId = map.Get("userId"),
+                DisplayName = map.Get("displayName"),
+                ProfileUrl = map.Get("profileUrl"),
+                Channels = !string.IsNullOrEmpty(channels) ? channels.Split(',') : null,
+            };
+
+            foreach (var entry in map)
+            {
+                if (entry.Key == "userId" || entry.Key == "displayName" || 
+                    entry.Key == "profileUrl" || entry.Key == "channels")
+                    continue;
+
+                if (to.Meta == null)
+                    to.Meta = new Dictionary<string, string>();
+
+                to.Meta[entry.Key] = entry.Value;
+            }
+
+            return to;
+        } 
+
+        public static T Populate<T>(this T dst, ServerEventMessage src, Dictionary<string, string> msg) where T : ServerEventMessage
         {
             dst.EventId = src.EventId;
             dst.Data = src.Data;
             dst.Selector = src.Selector;
+            dst.Channel = src.Channel;
             dst.Json = src.Json;
             dst.Op = src.Op;
 
+            Populate(dst, msg);
+
+            return dst;
+        }
+
+        private static T Populate<T>(this T dst, Dictionary<string, string> msg) where T : ServerEventMessage
+        {
             if (dst.Meta == null)
                 dst.Meta = new Dictionary<string, string>();
 
             foreach (var entry in msg)
             {
                 dst.Meta[entry.Key] = entry.Value;
+            }
+
+            var cmd = dst as ServerEventCommand;
+            if (cmd != null)
+            {
+                cmd.UserId = msg.Get("userId");
+                cmd.DisplayName = msg.Get("displayName");
+                cmd.ProfileUrl = msg.Get("profileUrl");
+
+                var channels = msg.Get("channels");
+                if (!string.IsNullOrEmpty(channels))
+                    cmd.Channels = channels.Split(',');
             }
 
             return dst;

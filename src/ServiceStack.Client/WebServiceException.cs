@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Runtime.Serialization;
+using System.Text;
+using ServiceStack.Model;
 using ServiceStack.Text;
 
 namespace ServiceStack
@@ -13,7 +15,7 @@ namespace ServiceStack
     [Serializable]
 #endif
     public class WebServiceException
-        : Exception
+        : Exception, IHasStatusCode, IHasStatusDescription, IResponseStatusConvertible
     {
         public WebServiceException() { }
         public WebServiceException(string message) : base(message) { }
@@ -43,7 +45,7 @@ namespace ServiceStack
                 }
             }
 
-            var rsMap = TypeSerializer.DeserializeFromString<Dictionary<string, string>>(responseStatus);
+            var rsMap = responseStatus.FromJsv<Dictionary<string, string>>();
             if (rsMap == null) return;
 
             rsMap = new Dictionary<string, string>(rsMap, PclExport.Instance.InvariantComparerIgnoreCase);
@@ -54,13 +56,13 @@ namespace ServiceStack
 
         private bool TryGetResponseStatusFromResponseDto(out string responseStatus)
         {
-            responseStatus = String.Empty;
+            responseStatus = string.Empty;
             try
             {
                 if (ResponseDto == null)
                     return false;
-                var jsv = TypeSerializer.SerializeToString(ResponseDto);
-                var map = TypeSerializer.DeserializeFromString<Dictionary<string, string>>(jsv);
+                var jsv = ResponseDto.ToJsv();
+                var map = jsv.FromJsv<Dictionary<string, string>>();
                 map = new Dictionary<string, string>(map, PclExport.Instance.InvariantComparerIgnoreCase);
 
                 return map.TryGetValue("ResponseStatus", out responseStatus);
@@ -73,11 +75,11 @@ namespace ServiceStack
 
         private bool TryGetResponseStatusFromResponseBody(out string responseStatus)
         {
-            responseStatus = String.Empty;
+            responseStatus = string.Empty;
             try
             {
-                if (String.IsNullOrEmpty(ResponseBody)) return false;
-                var map = TypeSerializer.DeserializeFromString<Dictionary<string, string>>(ResponseBody);
+                if (string.IsNullOrEmpty(ResponseBody)) return false;
+                var map = ResponseBody.FromJsv<Dictionary<string, string>>();
                 map = new Dictionary<string, string>(map, PclExport.Instance.InvariantComparerIgnoreCase);
                 return map.TryGetValue("ResponseStatus", out responseStatus);
             }
@@ -151,6 +153,65 @@ namespace ServiceStack
                 return responseStatus.Errors ?? new List<ResponseError>();
 
             return new List<ResponseError>();
+        }
+
+        public bool IsAny400()
+        {
+            return StatusCode >= 400 && StatusCode < 500;
+        }
+
+        public bool IsAny500()
+        {
+            return StatusCode >= 500 && StatusCode < 600;
+        }
+
+        public override string ToString()
+        {
+            var sb = StringBuilderCache.Allocate();
+            sb.AppendFormat("{0} {1}\n", StatusCode, StatusDescription);
+            sb.AppendFormat("Code: {0}, Message: {1}\n", ErrorCode, ErrorMessage);
+
+            var status = ResponseStatus;
+            if (status != null)
+            {
+                if (!status.Errors.IsNullOrEmpty())
+                {
+                    sb.Append("Field Errors:\n");
+                    foreach (var error in status.Errors)
+                    {
+                        sb.AppendFormat("  [{0}] {1}:{2}\n", error.FieldName, error.ErrorCode, error.Message);
+
+                        if (error.Meta != null && error.Meta.Count > 0)
+                        {
+                            sb.Append("  Field Meta:\n");
+                            foreach (var entry in error.Meta)
+                            {
+                                sb.AppendFormat("    {0}:{1}\n", entry.Key, entry.Value);
+                            }
+                        }
+                    }
+                }
+
+                if (status.Meta != null && status.Meta.Count > 0)
+                {
+                    sb.Append("Meta:\n");
+                    foreach (var entry in status.Meta)
+                    {
+                        sb.AppendFormat("  {0}:{1}\n", entry.Key, entry.Value);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(ServerStackTrace))
+                sb.AppendFormat("Server StackTrace:\n {0}\n", ServerStackTrace);
+
+
+            return StringBuilderCache.ReturnAndFree(sb);
+        }
+
+        public ResponseStatus ToResponseStatus()
+        {
+            return ResponseStatus;
         }
     }
 }

@@ -13,6 +13,11 @@ using Windows.Storage.Streams;
 
 namespace ServiceStack
 {
+    public class TokenException : AuthenticationException
+    {
+        public TokenException(string message) : base(message) { }
+    }
+
     public class AuthenticationException : Exception
     {
         public AuthenticationException()
@@ -137,20 +142,38 @@ namespace ServiceStack
             return null;
         }
 
-        internal static bool ShouldAuthenticate(Exception ex, string userName, string password)
+        internal static bool ShouldAuthenticate(WebException webEx, bool hasAuthInfo)
         {
-            var webEx = ex as WebException;
-            return (webEx != null
-                    && webEx.Response != null
-                    && ((HttpWebResponse)webEx.Response).StatusCode == HttpStatusCode.Unauthorized
-                    && !String.IsNullOrEmpty(userName)
-                    && !String.IsNullOrEmpty(password));
-        }
+            return webEx != null
+                && webEx.Response != null
+                && ((HttpWebResponse)webEx.Response).StatusCode == HttpStatusCode.Unauthorized
+                && hasAuthInfo;
+       }
 
-        internal static void AddBasicAuth(this WebRequest client, string userName, string password)
+        public static void AddBasicAuth(this WebRequest client, string userName, string password)
         {
+            if (string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(password))
+                return;
+
             client.Headers[HttpHeaders.Authorization]
                 = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(userName + ":" + password));
+        }
+
+        public static void AddApiKeyAuth(this WebRequest client, string apiKey)
+        {
+            if (string.IsNullOrEmpty(apiKey))
+                return;
+
+            client.Headers[HttpHeaders.Authorization]
+                = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(apiKey + ":"));
+        }
+
+        public static void AddBearerToken(this WebRequest client, string bearerToken)
+        {
+            if (string.IsNullOrEmpty(bearerToken))
+                return;
+
+            client.Headers[HttpHeaders.Authorization] = "Bearer " + bearerToken;
         }
 
 #if NETFX_CORE
@@ -174,12 +197,12 @@ namespace ServiceStack
             byte[] hash = md5.ComputeHash(inputBytes);
 
             // step 2, convert byte array to hex string
-            StringBuilder sb = new StringBuilder();
+            var sb = StringBuilderCache.Allocate();
             for (int i = 0; i < hash.Length; i++)
             {
                 sb.Append(hash[i].ToString("X2"));
             }
-            return sb.ToString().ToLower(); // The RFC requires the hex values are lowercase
+            return StringBuilderCache.ReturnAndFree(sb).ToLower(); // The RFC requires the hex values are lowercase
         }
 #endif
 
@@ -197,7 +220,6 @@ namespace ServiceStack
 
         internal static void AddAuthInfo(this WebRequest client, string userName, string password, AuthenticationInfo authInfo)
         {
-
             if ("basic".Equals(authInfo.method))
             {
                 client.AddBasicAuth(userName, password); // FIXME AddBasicAuth ignores the server provided Realm property. Potential Bug.
@@ -231,7 +253,6 @@ namespace ServiceStack
             string md5rraw = ha1 + ":" + authInfo.nonce + ":" + ncUse + ":" + authInfo.cnonce + ":" + authInfo.qop + ":" + ha2;
             string response = CalculateMD5Hash(md5rraw);
 
-
             string header =
                 "Digest username=\"" + userName + "\", realm=\"" + authInfo.realm + "\", nonce=\"" + authInfo.nonce + "\", uri=\"" +
                     client.RequestUri.PathAndQuery + "\", cnonce=\"" + authInfo.cnonce + "\", nc=" + ncUse + ", qop=\"" + authInfo.qop + "\", response=\"" + response +
@@ -256,6 +277,10 @@ namespace ServiceStack
 
         public static Type GetErrorResponseDtoType<TResponse>(object request)
         {
+            var batchRequest = request as object[];
+            if (batchRequest != null && batchRequest.Length > 0)
+                request = batchRequest[0]; 
+
             var hasResponseStatus = typeof(TResponse) is IHasResponseStatus
                 || typeof(TResponse).GetPropertyInfo("ResponseStatus") != null;
 
@@ -320,7 +345,5 @@ namespace ServiceStack
 
             return propertyInfo.GetProperty(response) as ResponseStatus;
         }
-
     }
-
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Serialization;
@@ -14,83 +15,84 @@ using ServiceStack.Host.Handlers;
 using ServiceStack.Host.HttpListener;
 using ServiceStack.IO;
 using ServiceStack.Logging;
+using ServiceStack.Model;
 using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack
 {
-	public static class HttpRequestExtensions
-	{
-	    /// <summary>
-		/// Gets string value from Items[name] then Cookies[name] if exists.
-		/// Useful when *first* setting the users response cookie in the request filter.
-		/// To access the value for this initial request you need to set it in Items[].
-		/// </summary>
-		/// <returns>string value or null if it doesn't exist</returns>
+    public static class HttpRequestExtensions
+    {
+        /// <summary>
+        /// Gets string value from Items[name] then Cookies[name] if exists.
+        /// Useful when *first* setting the users response cookie in the request filter.
+        /// To access the value for this initial request you need to set it in Items[].
+        /// </summary>
+        /// <returns>string value or null if it doesn't exist</returns>
         public static string GetItemOrCookie(this IRequest httpReq, string name)
-		{
-			object value;
-			if (httpReq.Items.TryGetValue(name, out value)) return value.ToString();
+        {
+            object value;
+            if (httpReq.Items.TryGetValue(name, out value)) return value.ToString();
 
-			Cookie cookie;
-			if (httpReq.Cookies.TryGetValue(name, out cookie)) return cookie.Value;
+            Cookie cookie;
+            if (httpReq.Cookies.TryGetValue(name, out cookie)) return cookie.Value;
 
-			return null;
-		}
+            return null;
+        }
 
-		/// <summary>
-		/// Gets request paramater string value by looking in the following order:
-		/// - QueryString[name]
-		/// - FormData[name]
-		/// - Cookies[name]
-		/// - Items[name]
-		/// </summary>
-		/// <returns>string value or null if it doesn't exist</returns>
+        /// <summary>
+        /// Gets request paramater string value by looking in the following order:
+        /// - QueryString[name]
+        /// - FormData[name]
+        /// - Cookies[name]
+        /// - Items[name]
+        /// </summary>
+        /// <returns>string value or null if it doesn't exist</returns>
         public static string GetParam(this IRequest httpReq, string name)
-		{
-			string value;
-			if ((value = httpReq.Headers[HttpHeaders.XParamOverridePrefix + name]) != null) return value;
-			if ((value = httpReq.QueryString[name]) != null) return value;
-			if ((value = httpReq.FormData[name]) != null) return value;
+        {
+            string value;
+            if ((value = httpReq.Headers[HttpHeaders.XParamOverridePrefix + name]) != null) return value;
+            if ((value = httpReq.QueryString[name]) != null) return value;
+            if ((value = httpReq.FormData[name]) != null) return value;
 
             //IIS will assign null to params without a name: .../?some_value can be retrieved as req.Params[null]
             //TryGetValue is not happy with null dictionary keys, so we should bail out here
             if (string.IsNullOrEmpty(name)) return null;
 
-			Cookie cookie;
-			if (httpReq.Cookies.TryGetValue(name, out cookie)) return cookie.Value;
+            Cookie cookie;
+            if (httpReq.Cookies.TryGetValue(name, out cookie)) return cookie.Value;
 
-			object oValue;
-			if (httpReq.Items.TryGetValue(name, out oValue)) return oValue.ToString();
+            object oValue;
+            if (httpReq.Items.TryGetValue(name, out oValue)) return oValue.ToString();
 
-			return null;
-		}
+            return null;
+        }
 
         public static string GetParentAbsolutePath(this IRequest httpReq)
-		{
-			return httpReq.GetAbsolutePath().ToParentPath();
-		}
+        {
+            return httpReq.GetAbsolutePath().ToParentPath();
+        }
 
         public static string GetAbsolutePath(this IRequest httpReq)
-		{
-			var resolvedPathInfo = httpReq.PathInfo;
+        {
+            var resolvedPathInfo = httpReq.PathInfo;
 
-			var pos = httpReq.RawUrl.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
-			if (pos == -1)
-				throw new ArgumentException(
-					String.Format("PathInfo '{0}' is not in Url '{1}'", resolvedPathInfo, httpReq.RawUrl));
+            var pos = httpReq.RawUrl.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
+            if (pos == -1)
+                throw new ArgumentException(
+                    String.Format("PathInfo '{0}' is not in Url '{1}'", resolvedPathInfo, httpReq.RawUrl));
 
-			return httpReq.RawUrl.Substring(0, pos + resolvedPathInfo.Length);
-		}
+            return httpReq.RawUrl.Substring(0, pos + resolvedPathInfo.Length);
+        }
 
         public static string GetParentPathUrl(this IRequest httpReq)
-		{
-			return httpReq.GetPathUrl().ToParentPath();
-		}
+        {
+            return httpReq.GetPathUrl().ToParentPath();
+        }
 
         public static string GetPathUrl(this IRequest httpReq)
-		{
-			var resolvedPathInfo = httpReq.PathInfo.TrimEnd('/');
+        {
+            var resolvedPathInfo = httpReq.PathInfo.TrimEnd('/');
 
             int pos;
 
@@ -105,29 +107,29 @@ namespace ServiceStack
                 pos = httpReq.AbsoluteUri.IndexOf(resolvedPathInfo, StringComparison.OrdinalIgnoreCase);
             }
 
-			if (pos == -1)
-				throw new ArgumentException(
-					String.Format("PathInfo '{0}' is not in Url '{1}'", resolvedPathInfo, httpReq.RawUrl));
+            if (pos == -1)
+                throw new ArgumentException(
+                    String.Format("PathInfo '{0}' is not in Url '{1}'", resolvedPathInfo, httpReq.RawUrl));
 
-			return httpReq.AbsoluteUri.Substring(0, pos + resolvedPathInfo.Length);
-		}
+            return httpReq.AbsoluteUri.Substring(0, pos + resolvedPathInfo.Length);
+        }
 
         public static string GetUrlHostName(this IRequest httpReq)
-		{
-			var aspNetReq = httpReq as AspNetRequest;
-			if (aspNetReq != null)
-			{
-				return aspNetReq.UrlHostName;
-			}
-			var uri = httpReq.AbsoluteUri;
+        {
+            var aspNetReq = httpReq as AspNetRequest;
+            if (aspNetReq != null)
+            {
+                return aspNetReq.UrlHostName;
+            }
+            var uri = httpReq.AbsoluteUri;
 
-			var pos = uri.IndexOf("://") + "://".Length;
-			var partialUrl = uri.Substring(pos);
-			var endPos = partialUrl.IndexOf('/');
-			if (endPos == -1) endPos = partialUrl.Length;
-			var hostName = partialUrl.Substring(0, endPos).Split(':')[0];
-			return hostName;
-		}
+            var pos = uri.IndexOf("://") + "://".Length;
+            var partialUrl = uri.Substring(pos);
+            var endPos = partialUrl.IndexOf('/');
+            if (endPos == -1) endPos = partialUrl.Length;
+            var hostName = partialUrl.Substring(0, endPos).Split(':')[0];
+            return hostName;
+        }
 
         public static string GetPhysicalPath(this IRequest httpReq)
         {
@@ -162,13 +164,13 @@ namespace ServiceStack
 
         //http://stackoverflow.com/a/757251/85785
         static readonly string[] VirtualPathPrefixes = HostingEnvironment.ApplicationVirtualPath == null || HostingEnvironment.ApplicationVirtualPath == "/"
-            ? new string[0]
+            ? TypeConstants.EmptyStringArray
             : new[] { HostingEnvironment.ApplicationVirtualPath, "~" + HostingEnvironment.ApplicationVirtualPath };
 
         public static string SanitizedVirtualPath(this string virtualPath)
         {
-            return HostContext.Config.StripApplicationVirtualPath 
-                ? virtualPath.TrimPrefixes(VirtualPathPrefixes) 
+            return HostContext.Config.StripApplicationVirtualPath
+                ? virtualPath.TrimPrefixes(VirtualPathPrefixes)
                 : virtualPath;
         }
 
@@ -189,128 +191,150 @@ namespace ServiceStack
         }
 
         public static string GetHttpMethodOverride(this IRequest httpReq)
-		{
-			var httpMethod = httpReq.Verb;
+        {
+            var httpMethod = httpReq.Verb;
 
-			if (httpMethod != HttpMethods.Post)
-				return httpMethod;			
+            if (httpMethod != HttpMethods.Post)
+                return httpMethod;
 
-			var overrideHttpMethod = 
-				httpReq.Headers[HttpHeaders.XHttpMethodOverride].ToNullIfEmpty()
-				?? httpReq.FormData[HttpHeaders.XHttpMethodOverride].ToNullIfEmpty()
-				?? httpReq.QueryString[HttpHeaders.XHttpMethodOverride].ToNullIfEmpty();
+            var overrideHttpMethod =
+                httpReq.Headers[HttpHeaders.XHttpMethodOverride].ToNullIfEmpty()
+                ?? httpReq.FormData[HttpHeaders.XHttpMethodOverride].ToNullIfEmpty()
+                ?? httpReq.QueryString[HttpHeaders.XHttpMethodOverride].ToNullIfEmpty();
 
-			if (overrideHttpMethod != null)
-			{
-				if (overrideHttpMethod != HttpMethods.Get && overrideHttpMethod != HttpMethods.Post)
-					httpMethod = overrideHttpMethod;
-			}
+            if (overrideHttpMethod != null)
+            {
+                if (overrideHttpMethod != HttpMethods.Get && overrideHttpMethod != HttpMethods.Post)
+                    httpMethod = overrideHttpMethod;
+            }
 
-			return httpMethod;
-		}
+            return httpMethod;
+        }
 
         public static string GetFormatModifier(this IRequest httpReq)
-		{
-			var format = httpReq.QueryString["format"];
-			if (format == null) return null;
-			var parts = format.SplitOnFirst('.');
-			return parts.Length > 1 ? parts[1] : null;
-		}
+        {
+            var format = httpReq.QueryString[Keywords.Format];
+            if (format == null)
+                return null;
+
+            var pos = format.IndexOf('.');
+            return pos >= 0 ? format.Substring(pos + 1) : null;
+        }
 
         public static bool HasNotModifiedSince(this IRequest httpReq, DateTime? dateTime)
-		{
-			if (!dateTime.HasValue) return false;
-			var strHeader = httpReq.Headers[HttpHeaders.IfModifiedSince];
-			try
-			{
-				if (strHeader != null)
-				{
-					var dateIfModifiedSince = DateTime.ParseExact(strHeader, "r", null);
-					var utcFromDate = dateTime.Value.ToUniversalTime();
-					//strip ms
-					utcFromDate = new DateTime(
-						utcFromDate.Ticks - (utcFromDate.Ticks % TimeSpan.TicksPerSecond),
-						utcFromDate.Kind
-					);
+        {
+            if (!dateTime.HasValue) return false;
+            var strHeader = httpReq.Headers[HttpHeaders.IfModifiedSince];
+            try
+            {
+                if (strHeader != null)
+                {
+                    var dateIfModifiedSince = DateTime.ParseExact(strHeader, "r", null);
+                    var utcFromDate = dateTime.Value.ToUniversalTime();
+                    //strip ms
+                    utcFromDate = new DateTime(
+                        utcFromDate.Ticks - (utcFromDate.Ticks % TimeSpan.TicksPerSecond),
+                        utcFromDate.Kind
+                    );
 
-					return utcFromDate <= dateIfModifiedSince;
-				}
-				return false;
-			}
-			catch
-			{
-				return false;
-			}
-		}
+                    return utcFromDate <= dateIfModifiedSince;
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         public static bool DidReturn304NotModified(this IRequest httpReq, DateTime? dateTime, IResponse httpRes)
-		{
-			if (httpReq.HasNotModifiedSince(dateTime))
-			{
-				httpRes.StatusCode = (int) HttpStatusCode.NotModified;
-				return true;
-			}
-			return false;
-		}
+        {
+            if (httpReq.HasNotModifiedSince(dateTime))
+            {
+                httpRes.StatusCode = (int)HttpStatusCode.NotModified;
+                return true;
+            }
+            return false;
+        }
 
         public static string GetJsonpCallback(this IRequest httpReq)
-		{
-			return httpReq == null ? null : httpReq.QueryString["callback"];
-		}
+        {
+            return httpReq == null ? null : httpReq.QueryString[Keywords.Callback];
+        }
 
 
         public static Dictionary<string, string> CookiesAsDictionary(this IRequest httpReq)
-		{
-			var map = new Dictionary<string, string>();
-			var aspNet = httpReq.OriginalRequest as HttpRequest;
-			if (aspNet != null)
-			{
-				foreach (var name in aspNet.Cookies.AllKeys)
-				{
-					var cookie = aspNet.Cookies[name];
-					if (cookie == null) continue;
-					map[name] = cookie.Value;
-				}
-			}
-			else
-			{
-				var httpListener = httpReq.OriginalRequest as HttpListenerRequest;
-				if (httpListener != null)
-				{
-					for (var i = 0; i < httpListener.Cookies.Count; i++)
-					{
-						var cookie = httpListener.Cookies[i];
-						if (cookie == null || cookie.Name == null) continue;
-						map[cookie.Name] = cookie.Value;
-					}
-				}
-			}
-			return map;
-		}
+        {
+            var map = new Dictionary<string, string>();
+            var aspNet = httpReq.OriginalRequest as HttpRequest;
+            if (aspNet != null)
+            {
+                foreach (var name in aspNet.Cookies.AllKeys)
+                {
+                    var cookie = aspNet.Cookies[name];
+                    if (cookie == null) continue;
+                    map[name] = cookie.Value;
+                }
+            }
+            else
+            {
+                var httpListener = httpReq.OriginalRequest as HttpListenerRequest;
+                if (httpListener != null)
+                {
+                    for (var i = 0; i < httpListener.Cookies.Count; i++)
+                    {
+                        var cookie = httpListener.Cookies[i];
+                        if (cookie == null || cookie.Name == null) continue;
+                        map[cookie.Name] = cookie.Value;
+                    }
+                }
+            }
+            return map;
+        }
 
         public static int ToStatusCode(this Exception ex)
         {
-            int errorStatus;
-            if (HostContext.Config != null && HostContext.Config.MapExceptionToStatusCode.TryGetValue(ex.GetType(), out errorStatus))
+            var hasStatusCode = ex as IHasStatusCode;
+            if (hasStatusCode != null)
+                return hasStatusCode.StatusCode;
+
+            if (HostContext.Config != null)
             {
-                return errorStatus;
+                var exType = ex.GetType();
+                foreach (var entry in HostContext.Config.MapExceptionToStatusCode)
+                {
+                    if (entry.Key.IsAssignableFromType(exType))
+                        return entry.Value;
+                }
             }
 
             if (ex is HttpError) return ((HttpError)ex).Status;
             if (ex is NotImplementedException || ex is NotSupportedException) return (int)HttpStatusCode.MethodNotAllowed;
-            if (ex is ArgumentException || ex is SerializationException) return (int)HttpStatusCode.BadRequest;
-            if (ex is AuthenticationException) return (int) HttpStatusCode.Unauthorized;
-            if (ex is UnauthorizedAccessException) return (int) HttpStatusCode.Forbidden;
-            if (ex is OptimisticConcurrencyException) return (int) HttpStatusCode.Conflict;
+            if (ex is ArgumentException || ex is SerializationException || ex is FormatException) return (int)HttpStatusCode.BadRequest;
+            if (ex is AuthenticationException) return (int)HttpStatusCode.Unauthorized;
+            if (ex is UnauthorizedAccessException) return (int)HttpStatusCode.Forbidden;
+            if (ex is OptimisticConcurrencyException) return (int)HttpStatusCode.Conflict;
             return (int)HttpStatusCode.InternalServerError;
-	    }
-        
-        public static string ToErrorCode(this Exception ex)
-        {
-            if (ex is HttpError) return ((HttpError)ex).ErrorCode;
-            return ex.GetType().Name;
         }
 
+        public static string ToErrorCode(this Exception ex)
+        {
+            var hasErrorCode = ex as IHasErrorCode;
+            return (hasErrorCode != null ? hasErrorCode.ErrorCode : null)
+                ?? ex.GetType().Name;
+        }
+
+        public static WebServiceException ToWebServiceException(this HttpError error)
+        {
+            var to = new WebServiceException(error.Message, error.InnerException)
+            {
+                StatusCode = error.Status,
+                StatusDescription = error.StatusDescription,
+                ResponseDto = error.Response,
+            };
+
+            return to;
+        }
 
 
         /**
@@ -481,7 +505,7 @@ namespace ServiceStack
         {
             if (mappedPathRoot == null) return null;
 
-            var sbPathInfo = new StringBuilder();
+            var sbPathInfo = StringBuilderCache.Allocate();
             var fullPathParts = fullPath.Split('/');
             var mappedPathRootParts = mappedPathRoot.Split('/');
             var fullPathIndexOffset = mappedPathRootParts.Length - 1;
@@ -508,7 +532,7 @@ namespace ServiceStack
             }
             if (!pathRootFound) return null;
 
-            var path = sbPathInfo.ToString();
+            var path = StringBuilderCache.ReturnAndFree(sbPathInfo);
             return path.Length > 1 ? path.TrimEnd('/') : "/";
         }
 
@@ -527,7 +551,60 @@ namespace ServiceStack
             return false;
         }
 
+        /// <summary>
+        /// Duplicate Params are given a unique key by appending a #1 suffix
+        /// </summary>
         public static Dictionary<string, string> GetRequestParams(this IRequest request)
+        {
+            var map = new Dictionary<string, string>();
+
+            foreach (var name in request.QueryString.AllKeys)
+            {
+                if (name == null) continue; //thank you ASP.NET
+
+                var values = request.QueryString.GetValues(name);
+                if (values.Length == 1)
+                {
+                    map[name] = values[0];
+                }
+                else
+                {
+                    for (var i = 0; i < values.Length; i++)
+                    {
+                        map[name + (i == 0 ? "" : "#" + i)] = values[i];
+                    }
+                }
+            }
+
+            if ((request.Verb == HttpMethods.Post || request.Verb == HttpMethods.Put)
+                && request.FormData != null)
+            {
+                foreach (var name in request.FormData.AllKeys)
+                {
+                    if (name == null) continue; //thank you ASP.NET
+
+                    var values = request.FormData.GetValues(name);
+                    if (values.Length == 1)
+                    {
+                        map[name] = values[0];
+                    }
+                    else
+                    {
+                        for (var i = 0; i < values.Length; i++)
+                        {
+                            map[name + (i == 0 ? "" : "#" + i)] = values[i];
+                        }
+                    }
+                }
+            }
+
+            return map;
+        }
+
+        /// <summary>
+        /// Duplicate params have their values joined together in a comma-delimited string
+        /// </summary>
+        public static Dictionary<string, string> GetFlattenedRequestParams(this IRequest request)
         {
             var map = new Dictionary<string, string>();
 
@@ -548,25 +625,25 @@ namespace ServiceStack
             }
 
             return map;
-        }
+        } 
 
         public static string GetQueryStringContentType(this IRequest httpReq)
         {
-            var callback = httpReq.QueryString["callback"];
-            if (!String.IsNullOrEmpty(callback)) return MimeTypes.Json;
+            var callback = httpReq.QueryString[Keywords.Callback];
+            if (!string.IsNullOrEmpty(callback)) return MimeTypes.Json;
 
-            var format = httpReq.QueryString["format"];
+            var format = httpReq.QueryString[Keywords.Format];
             if (format == null)
             {
                 const int formatMaxLength = 4;
                 var pi = httpReq.PathInfo;
                 if (pi == null || pi.Length <= formatMaxLength) return null;
                 if (pi[0] == '/') pi = pi.Substring(1);
-                format = pi.SplitOnFirst('/')[0];
+                format = pi.LeftPart('/');
                 if (format.Length > formatMaxLength) return null;
             }
 
-            format = format.SplitOnFirst('.')[0].ToLower();
+            format = format.LeftPart('.').ToLower();
             if (format.Contains("json")) return MimeTypes.Json;
             if (format.Contains("xml")) return MimeTypes.Xml;
             if (format.Contains("jsv")) return MimeTypes.Jsv;
@@ -616,7 +693,7 @@ namespace ServiceStack
                 var hasPreferredContentTypes = new bool[preferredContentTypes.Length];
                 foreach (var acceptsType in acceptContentTypes)
                 {
-                    var contentType = acceptsType.SplitOnFirst(";")[0];
+                    var contentType = ContentFormat.GetRealContentType(acceptsType);
                     acceptsAnything = acceptsAnything || contentType == "*/*";
 
                     for (var i = 0; i < preferredContentTypes.Length; i++)
@@ -630,7 +707,7 @@ namespace ServiceStack
                             return preferredContentType;
                     }
                 }
-                
+
                 for (var i = 0; i < preferredContentTypes.Length; i++)
                 {
                     if (hasPreferredContentTypes[i]) return preferredContentTypes[i];
@@ -648,7 +725,8 @@ namespace ServiceStack
                 {
                     foreach (var customContentType in customContentTypes)
                     {
-                        if (contentType.StartsWith(customContentType)) return customContentType;
+                        if (contentType.StartsWith(customContentType, StringComparison.OrdinalIgnoreCase))
+                            return customContentType;
                     }
                 }
             }
@@ -706,22 +784,35 @@ namespace ServiceStack
             return url;
         }
 
+        public static string InferBaseUrl(this string absoluteUri, string fromPathInfo = null)
+        {
+            if (string.IsNullOrEmpty(fromPathInfo))
+            {
+                fromPathInfo = "/" + (HostContext.Config.HandlerFactoryPath ?? "");
+            }
+            else
+            {
+                fromPathInfo = fromPathInfo.TrimEnd('/');
+                if (fromPathInfo.Length == 0)
+                    return null;
+            }
+
+            if (string.IsNullOrEmpty(absoluteUri))
+                return null;
+
+            var pos = absoluteUri.IndexOf(fromPathInfo, "https://".Length + 1, StringComparison.Ordinal);
+            return pos >= 0 ? absoluteUri.Substring(0, pos) : absoluteUri;
+        }
+
         public static string GetBaseUrl(this IRequest httpReq)
         {
             var baseUrl = HttpHandlerFactory.GetBaseUrl();
-            if (baseUrl != null) return baseUrl;
+            if (baseUrl != null)
+                return baseUrl.NormalizeScheme();
 
-            var pathInfo = httpReq.PathInfo;
-            if (pathInfo != null)
-            {
-                var absoluteUri = httpReq.AbsoluteUri;
-                var pos = absoluteUri.IndexOf(pathInfo, StringComparison.OrdinalIgnoreCase);
-                if (pos >= 0)
-                {
-                    baseUrl = absoluteUri.Substring(0, pos);
-                    return baseUrl.NormalizeScheme();
-                }
-            }
+            baseUrl = httpReq.AbsoluteUri.InferBaseUrl(fromPathInfo: httpReq.PathInfo);
+            if (baseUrl != null)
+                return baseUrl.NormalizeScheme();
 
             var handlerPath = HostContext.Config.HandlerFactoryPath;
 
@@ -781,25 +872,25 @@ namespace ServiceStack
                 string ipAddressNumber = null;
                 if (isIpv4Address)
                 {
-                    ipAddressNumber = request.UserHostAddress.SplitOnFirst(":")[0];
+                    ipAddressNumber = request.UserHostAddress.LeftPart(":");
                 }
                 else
                 {
                     if (request.UserHostAddress.Contains("]:"))
                     {
-                        ipAddressNumber = request.UserHostAddress.SplitOnLast(":")[0];
+                        ipAddressNumber = request.UserHostAddress.LastLeftPart(":");
                     }
                     else
                     {
                         ipAddressNumber = request.UserHostAddress.LastIndexOf("%", StringComparison.InvariantCulture) > 0 ?
-                            request.UserHostAddress.SplitOnLast(":")[0] :
+                            request.UserHostAddress.LastLeftPart(":") :
                             request.UserHostAddress;
                     }
                 }
 
                 try
                 {
-                    ipAddressNumber = ipAddressNumber.SplitOnFirst(',')[0];
+                    ipAddressNumber = ipAddressNumber.LeftPart(',');
                     var ipAddress = ipAddressNumber.StartsWith("::1")
                         ? IPAddress.IPv6Loopback
                         : IPAddress.Parse(ipAddressNumber);
@@ -866,8 +957,12 @@ namespace ServiceStack
 
         public static IHttpRequest ToRequest(this HttpContext httpCtx, string operationName = null)
         {
+            if (httpCtx == null)
+                throw new NotImplementedException(ErrorMessages.OnlyAllowedInAspNetHosts);
+
             return new AspNetRequest(httpCtx.ToHttpContextBase(), operationName);
         }
+
         public static IHttpRequest ToRequest(this HttpContextBase httpCtx, string operationName = null)
         {
             return new AspNetRequest(httpCtx, operationName);
@@ -880,12 +975,17 @@ namespace ServiceStack
 
         public static IHttpRequest ToRequest(this HttpListenerContext httpCtxReq, string operationName = null)
         {
-            return ((HttpListenerBase)ServiceStackHost.Instance).CreateRequest(httpCtxReq, operationName);   
+            return ((HttpListenerBase)ServiceStackHost.Instance).CreateRequest(httpCtxReq, operationName);
         }
 
-        public static IHttpResponse ToResponse(this HttpRequestBase httpCtx)
+        public static IHttpResponse ToResponse(this HttpContext httpCtx)
         {
             return httpCtx.ToRequest().HttpResponse;
+        }
+
+        public static IHttpResponse ToResponse(this HttpRequestBase aspReq)
+        {
+            return aspReq.ToRequest().HttpResponse;
         }
 
         public static IHttpResponse ToResponse(this HttpListenerContext httpCtx)
@@ -921,8 +1021,8 @@ namespace ServiceStack
                     ? dtoType.GetElementType()
                     : dtoType;
             }
-            return req.OperationName != null 
-                ? HostContext.Metadata.GetOperationType(req.OperationName) 
+            return req.OperationName != null
+                ? HostContext.Metadata.GetOperationType(req.OperationName)
                 : null;
         }
 
@@ -932,20 +1032,28 @@ namespace ServiceStack
             return req.Dto != null && req.Dto.GetType().IsArray;
         }
 
+        public static void SetAutoBatchCompletedHeader(this IRequest req, int completed)
+        {
+            if (req == null || req.Response == null)
+                return;
+
+            req.Response.AddHeader(HttpHeaders.XAutoBatchCompleted, completed.ToString());
+        }
+
         public static System.ServiceModel.Channels.Message GetSoapMessage(this IRequest httpReq)
         {
-            return httpReq.Items["SoapMessage"] as System.ServiceModel.Channels.Message;
+            return httpReq.Items[Keywords.SoapMessage] as System.ServiceModel.Channels.Message;
         }
 
         public static void SetRoute(this IRequest req, RestPath route)
         {
-            req.Items["__route"] = route;
+            req.Items[Keywords.Route] = route;
         }
 
         public static RestPath GetRoute(this IRequest req)
         {
             object route;
-            req.Items.TryGetValue("__route", out route);
+            req.Items.TryGetValue(Keywords.Route, out route);
             return route as RestPath;
         }
 

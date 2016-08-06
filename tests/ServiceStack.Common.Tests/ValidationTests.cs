@@ -1,7 +1,10 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using ServiceStack.FluentValidation;
+using ServiceStack.Messaging;
 using ServiceStack.Testing;
+using ServiceStack.Text;
 using ServiceStack.Validation;
 
 namespace ServiceStack.Common.Tests
@@ -26,11 +29,13 @@ namespace ServiceStack.Common.Tests
         }
     }
 
-    public class DtoAResponse
+    public class DtoA : IReturn<DtoAResponse>
     {
+        public string FieldA { get; set; }
+        public List<DtoB> Items { get; set; }
     }
 
-    public class DtoA : IReturn<DtoAResponse>
+    public class DtoAResponse
     {
         public string FieldA { get; set; }
         public List<DtoB> Items { get; set; }
@@ -43,6 +48,14 @@ namespace ServiceStack.Common.Tests
 
     internal interface IDtoBValidator : IValidator<DtoB> {}
 
+    public class DtoAService : Service
+    {
+        public object Any(DtoA request)
+        {
+            return request.ConvertTo<DtoAResponse>();
+        }
+    }
+
     [TestFixture]
     public class ValidationTests
     {
@@ -51,18 +64,32 @@ namespace ServiceStack.Common.Tests
         {
             using (var appHost = new BasicAppHost
             {
+                ConfigureAppHost = host => {
+                    host.RegisterService<DtoAService>();
+                    host.Plugins.Add(new ValidationFeature());
+                },
                 ConfigureContainer = c => {
                     c.RegisterAs<DtoBValidator, IDtoBValidator>();
                     c.RegisterValidators(typeof(DtoARequestValidator).Assembly);
                 }
             }.Init())
             {
-                var c = appHost.Container;
-                var dtoAValidator = (DtoARequestValidator)c.TryResolve<IValidator<DtoA>>();
+                var dtoAValidator = (DtoARequestValidator)appHost.TryResolve<IValidator<DtoA>>();
                 Assert.That(dtoAValidator, Is.Not.Null);
                 Assert.That(dtoAValidator.dtoBValidator, Is.Not.Null);
-                Assert.That(c.TryResolve<IValidator<DtoB>>(), Is.Not.Null);
-                Assert.That(c.TryResolve<IDtoBValidator>(), Is.Not.Null);
+                Assert.That(appHost.TryResolve<IValidator<DtoB>>(), Is.Not.Null);
+                Assert.That(appHost.TryResolve<IDtoBValidator>(), Is.Not.Null);
+
+                var result = dtoAValidator.Validate(new DtoA());
+                Assert.That(result.IsValid, Is.False);
+                Assert.That(result.Errors.Count, Is.EqualTo(1));
+
+                result = dtoAValidator.Validate(new DtoA { FieldA = "foo", Items = new[] { new DtoB() }.ToList() });
+                Assert.That(result.IsValid, Is.False);
+                Assert.That(result.Errors.Count, Is.EqualTo(1));
+
+                result = dtoAValidator.Validate(new DtoA { FieldA = "foo", Items = new[] { new DtoB { FieldB = "bar" } }.ToList() });
+                Assert.That(result.IsValid, Is.True);
             }
         }
     }

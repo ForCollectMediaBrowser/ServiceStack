@@ -21,11 +21,12 @@ namespace ServiceStack
         {
             this.RequiredPermissions = permissions.ToList();
             this.ApplyTo = applyTo;
-            this.Priority = (int) RequestFilterPriority.RequiredPermission;
+            this.Priority = (int)RequestFilterPriority.RequiredPermission;
         }
 
         public RequiredPermissionAttribute(params string[] permissions)
-            : this(ApplyTo.All, permissions) {}
+            : this(ApplyTo.All, permissions)
+        { }
 
         public override void Execute(IRequest req, IResponse res, object requestDto)
         {
@@ -37,10 +38,14 @@ namespace ServiceStack
 
             var session = req.GetSession();
 
-            if (session != null && session.HasRole(RoleNames.Admin))
-                return;
+            var authRepo = HostContext.AppHost.GetAuthRepository(req);
+            using (authRepo as IDisposable)
+            {
+                if (session != null && session.HasRole(RoleNames.Admin, authRepo))
+                    return;
 
-            if (HasAllPermissions(req, session)) return;
+                if (HasAllPermissions(req, session, authRepo)) return;
+            }
 
             if (DoHtmlRedirectIfConfigured(req, res)) return;
 
@@ -49,13 +54,13 @@ namespace ServiceStack
             res.EndRequest();
         }
 
-        public bool HasAllPermissions(IRequest req, IAuthSession session, IAuthRepository userAuthRepo=null)
+        public bool HasAllPermissions(IRequest req, IAuthSession session, IAuthRepository authRepo)
         {
-            if (HasAllPermissions(session)) return true;
+            if (HasAllPermissions(session, authRepo)) return true;
 
-            session.UpdateFromUserAuthRepo(req, userAuthRepo);
+            session.UpdateFromUserAuthRepo(req, authRepo);
 
-            if (HasAllPermissions(session))
+            if (HasAllPermissions(session, authRepo))
             {
                 req.SaveSession(session);
                 return true;
@@ -63,17 +68,17 @@ namespace ServiceStack
             return false;
         }
 
-        public bool HasAllPermissions(IAuthSession session)
+        public bool HasAllPermissions(IAuthSession session, IAuthRepository authRepo)
         {
             if (session == null)
                 return false;
 
-            return this.RequiredPermissions.All(session.HasPermission);
+            return this.RequiredPermissions.All(x => session.HasPermission(x, authRepo));
         }
 
         protected bool Equals(RequiredPermissionAttribute other)
         {
-            return base.Equals(other) 
+            return base.Equals(other)
                 && Equals(RequiredPermissions, other.RequiredPermissions);
         }
 
@@ -82,14 +87,14 @@ namespace ServiceStack
             if (ReferenceEquals(null, obj)) return false;
             if (ReferenceEquals(this, obj)) return true;
             if (obj.GetType() != this.GetType()) return false;
-            return Equals((RequiredPermissionAttribute) obj);
+            return Equals((RequiredPermissionAttribute)obj);
         }
 
         public override int GetHashCode()
         {
             unchecked
             {
-                return (base.GetHashCode()*397) ^ (RequiredPermissions != null ? RequiredPermissions.GetHashCode() : 0);
+                return (base.GetHashCode() * 397) ^ (RequiredPermissions != null ? RequiredPermissions.GetHashCode() : 0);
             }
         }
     }

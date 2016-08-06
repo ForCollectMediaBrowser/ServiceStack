@@ -6,6 +6,7 @@ using System.Threading;
 using RabbitMQ.Client;
 using ServiceStack.Logging;
 using ServiceStack.Messaging;
+using ServiceStack.Text;
 
 namespace ServiceStack.RabbitMq
 {
@@ -101,7 +102,7 @@ namespace ServiceStack.RabbitMq
         {
             set
             {
-                PriortyQueuesWhitelist = new string[0];
+                PriortyQueuesWhitelist = TypeConstants.EmptyStringArray;
             }
         }
 
@@ -116,7 +117,7 @@ namespace ServiceStack.RabbitMq
         /// </summary>
         public bool DisablePublishingResponses
         {
-            set { PublishResponsesWhitelist = value ? new string[0] : null; }
+            set { PublishResponsesWhitelist = value ? TypeConstants.EmptyStringArray : null; }
         }
 
         private IConnection connection;
@@ -159,22 +160,22 @@ namespace ServiceStack.RabbitMq
         }
 
 
-        public void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn)
+        public virtual void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn)
         {
             RegisterHandler(processMessageFn, null, noOfThreads: 1);
         }
 
-        public void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn, int noOfThreads)
+        public virtual void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn, int noOfThreads)
         {
             RegisterHandler(processMessageFn, null, noOfThreads);
         }
 
-        public void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn, Action<IMessage<T>, Exception> processExceptionEx)
+        public virtual void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn, Action<IMessageHandler, IMessage<T>, Exception> processExceptionEx)
         {
             RegisterHandler(processMessageFn, processExceptionEx, noOfThreads: 1);
         }
 
-        public void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn, Action<IMessage<T>, Exception> processExceptionEx, int noOfThreads)
+        public virtual void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn, Action<IMessageHandler, IMessage<T>, Exception> processExceptionEx, int noOfThreads)
         {
             if (handlerMap.ContainsKey(typeof(T)))
             {
@@ -187,7 +188,7 @@ namespace ServiceStack.RabbitMq
             LicenseUtils.AssertValidUsage(LicenseFeature.ServiceStack, QuotaType.Operations, handlerMap.Count);
         }
 
-        protected IMessageHandlerFactory CreateMessageHandlerFactory<T>(Func<IMessage<T>, object> processMessageFn, Action<IMessage<T>, Exception> processExceptionEx)
+        protected IMessageHandlerFactory CreateMessageHandlerFactory<T>(Func<IMessage<T>, object> processMessageFn, Action<IMessageHandler, IMessage<T>, Exception> processExceptionEx)
         {
             return new MessageHandlerFactory<T>(this, processMessageFn, processExceptionEx)
             {
@@ -214,7 +215,7 @@ namespace ServiceStack.RabbitMq
             get { return Interlocked.CompareExchange(ref bgThreadCount, 0, 0); }
         }
 
-        public IMessageHandlerStats GetStats()
+        public virtual IMessageHandlerStats GetStats()
         {
             lock (workers)
             {
@@ -224,29 +225,16 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public string GetStatus()
+        public virtual string GetStatus()
         {
-            switch (Interlocked.CompareExchange(ref status, 0, 0))
-            {
-                case WorkerStatus.Disposed:
-                    return "Disposed";
-                case WorkerStatus.Stopped:
-                    return "Stopped";
-                case WorkerStatus.Stopping:
-                    return "Stopping";
-                case WorkerStatus.Starting:
-                    return "Starting";
-                case WorkerStatus.Started:
-                    return "Started";
-            }
-            return null;
+            return WorkerStatus.ToString(Interlocked.CompareExchange(ref status, 0, 0));
         }
 
-        public string GetStatsDescription()
+        public virtual string GetStatsDescription()
         {
             lock (workers)
             {
-                var sb = new StringBuilder("#MQ SERVER STATS:\n");
+                var sb = StringBuilderCache.Allocate().Append("#MQ SERVER STATS:\n");
                 sb.AppendLine("===============");
                 sb.AppendLine("Current Status: " + GetStatus());
                 sb.AppendLine("Listening On: " + string.Join(", ", workers.ToList().ConvertAll(x => x.QueueName).ToArray()));
@@ -260,11 +248,11 @@ namespace ServiceStack.RabbitMq
                     sb.AppendLine(worker.GetStats().ToString());
                     sb.AppendLine("---------------\n");
                 }
-                return sb.ToString();
+                return StringBuilderCache.ReturnAndFree(sb);
             }
         }
 
-        public void Init()
+        public virtual void Init()
         {
             if (workers != null) return;
 
@@ -325,7 +313,7 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public void Start()
+        public virtual void Start()
         {
             if (Interlocked.CompareExchange(ref status, 0, 0) == WorkerStatus.Started)
             {
@@ -404,21 +392,31 @@ namespace ServiceStack.RabbitMq
                             case WorkerOperation.Stop:
                                 Log.Debug("Stop Command Issued");
 
-                                if (Interlocked.CompareExchange(ref status, WorkerStatus.Stopped, WorkerStatus.Started) != WorkerStatus.Started)
+                                Interlocked.CompareExchange(ref status, WorkerStatus.Stopping, WorkerStatus.Started);
+                                try
+                                {
+                                    StopWorkerThreads();
+                                }
+                                finally
+                                {
                                     Interlocked.CompareExchange(ref status, WorkerStatus.Stopped, WorkerStatus.Stopping);
-
-                                StopWorkerThreads();
+                                }
                                 return; //exits
 
                             case WorkerOperation.Restart:
                                 Log.Debug("Restart Command Issued");
 
-                                if (Interlocked.CompareExchange(ref status, WorkerStatus.Stopped, WorkerStatus.Started) != WorkerStatus.Started)
+                                Interlocked.CompareExchange(ref status, WorkerStatus.Stopping, WorkerStatus.Started);
+                                try
+                                {
+                                    StopWorkerThreads();
+                                }
+                                finally
+                                {
                                     Interlocked.CompareExchange(ref status, WorkerStatus.Stopped, WorkerStatus.Stopping);
+                                }
 
-                                StopWorkerThreads();
                                 StartWorkerThreads();
-
                                 Interlocked.CompareExchange(ref status, WorkerStatus.Started, WorkerStatus.Stopped);
                                 break; //continues
                         }
@@ -448,7 +446,7 @@ namespace ServiceStack.RabbitMq
             Log.Debug("Exiting RunLoop()...");
         }
 
-        public void Stop()
+        public virtual void Stop()
         {
             if (Interlocked.CompareExchange(ref status, 0, 0) == WorkerStatus.Disposed)
                 throw new ObjectDisposedException("MQ Host has been disposed");
@@ -463,7 +461,14 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public void Restart()
+        public virtual void WaitForWorkersToStop(TimeSpan? timeout=null)
+        {
+            ExecExtensions.RetryUntilTrue(
+                () => Interlocked.CompareExchange(ref status, 0, 0) == WorkerStatus.Stopped,
+                timeout);            
+        }
+
+        public virtual void Restart()
         {
             if (Interlocked.CompareExchange(ref status, 0, 0) == WorkerStatus.Disposed)
                 throw new ObjectDisposedException("MQ Host has been disposed");
@@ -478,7 +483,7 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public void StartWorkerThreads()
+        public virtual void StartWorkerThreads()
         {
             Log.Debug("Starting all Rabbit MQ Server worker threads...");
             foreach (var worker in workers)
@@ -495,7 +500,7 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public void StopWorkerThreads()
+        public virtual void StopWorkerThreads()
         {
             Log.Debug("Stopping all Rabbit MQ Server worker threads...");
             foreach (var worker in workers)
@@ -555,7 +560,7 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public void Dispose()
+        public virtual void Dispose()
         {
             if (Interlocked.CompareExchange(ref status, 0, 0) == WorkerStatus.Disposed)
                 return;

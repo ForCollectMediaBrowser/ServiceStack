@@ -15,6 +15,7 @@ using ServiceStack.Html;
 using ServiceStack.Messaging;
 using ServiceStack.MiniProfiler;
 using ServiceStack.Redis;
+using ServiceStack.Text;
 using ServiceStack.Web;
 using IHtmlString = System.Web.IHtmlString;
 
@@ -62,6 +63,9 @@ namespace ServiceStack.Razor
 
         public dynamic ViewBag { get; set; }
 
+        public static Action<RenderingPage, string> WriteLiteralFn = DefaultWriteLiteral;
+        public static Action<RenderingPage, TextWriter, string> WriteLiteralToFn = DefaultWriteLiteralTo;
+
         public IViewBag TypedViewBag
         {
             get { return (IViewBag)ViewBag; }
@@ -81,22 +85,32 @@ namespace ServiceStack.Razor
         //overridden by the RazorEngine when razor generates code.
         public abstract void Execute();
 
+        public static void DefaultWriteLiteral(RenderingPage page, string str)
+        {
+            page.Output.Write(str);
+        }
+
+        public static void DefaultWriteLiteralTo(RenderingPage page, TextWriter writer, string str)
+        {
+            writer.Write(str);
+        }
+
         //No HTML encoding
         public virtual void WriteLiteral(string str)
         {
-            this.Output.Write(str);
+            WriteLiteralFn(this, str);
         }
 
         //With HTML encoding
         public virtual void Write(object obj)
         {
-            this.Output.Write(HtmlEncode(obj));
+            WriteLiteralFn(this, HtmlEncode(obj));
         }
 
         //With HTML encoding
         public virtual void WriteTo(TextWriter writer, object obj)
         {
-            writer.Write(HtmlEncode(obj));
+            WriteLiteralToFn(this, writer, HtmlEncode(obj));
         }
 
         public virtual void WriteTo(TextWriter writer, HelperResult value)
@@ -120,7 +134,7 @@ namespace ServiceStack.Razor
             if (literal == null)
                 return;
 
-            writer.Write(literal);
+            WriteLiteralToFn(this, writer, literal);
         }
 
         private static string HtmlEncode(object value)
@@ -151,7 +165,7 @@ namespace ServiceStack.Razor
                                       params AttributeValue[] values)
         {
             var writtenAttribute = false;
-            var attributeBuilder = new StringBuilder(prefix.Item1);
+            var attributeBuilder = StringBuilderCache.Allocate().Append(prefix.Item1);
 
             foreach (var value in values)
             {
@@ -175,9 +189,9 @@ namespace ServiceStack.Razor
             var renderAttribute = writtenAttribute || values.Length == 0;
 
             if (renderAttribute)
-            {
-                return attributeBuilder.ToString();
-            }
+                return StringBuilderCache.ReturnAndFree(attributeBuilder);
+
+            StringBuilderCache.Free(attributeBuilder);
 
             return string.Empty;
         }
@@ -376,6 +390,11 @@ namespace ServiceStack.Razor
             return this.AppHost.TryResolve<T>();
         }
 
+        public virtual T GetPlugin<T>() where T : class, IPlugin
+        {
+            return this.AppHost.GetPlugin<T>();
+        }
+
         public virtual T TryResolve<T>()
         {
             return this.AppHost.TryResolve<T>();
@@ -392,6 +411,13 @@ namespace ServiceStack.Razor
             return service;
         }
 
+        private IServiceGateway gateway;
+        public virtual IServiceGateway Gateway
+        {
+            get { return gateway ?? (gateway = HostContext.AppHost.GetServiceGateway(Request)); }
+        }
+
+        [Obsolete("Use Gateway")]
         public virtual object ExecuteService<T>(Func<T, object> fn)
         {
             var service = ResolveService<T>();
@@ -403,7 +429,7 @@ namespace ServiceStack.Razor
 
         public bool IsError
         {
-            get { return ModelError != null; }
+            get { return ModelError != null || GetErrorStatus() != null; }
         }
 
         public object ModelError { get; set; }
@@ -411,25 +437,25 @@ namespace ServiceStack.Razor
         private ICacheClient cache;
         public ICacheClient Cache
         {
-            get { return cache ?? (cache = Get<ICacheClient>()); }
+            get { return cache ?? (cache = HostContext.AppHost.GetCacheClient(Request)); }
         }
 
         private IDbConnection db;
         public IDbConnection Db
         {
-            get { return db ?? (db = Get<IDbConnectionFactory>().OpenDbConnection()); }
+            get { return db ?? (db = HostContext.AppHost.GetDbConnection(Request)); }
         }
 
         private IRedisClient redis;
         public IRedisClient Redis
         {
-            get { return redis ?? (redis = Get<IRedisClientsManager>().GetClient()); }
+            get { return redis ?? (redis = HostContext.AppHost.GetRedisClient(Request)); }
         }
 
         private IMessageProducer messageProducer;
         public virtual IMessageProducer MessageProducer
         {
-            get { return messageProducer ?? (messageProducer = Get<IMessageFactory>().CreateMessageProducer()); }
+            get { return messageProducer ?? (messageProducer = HostContext.AppHost.GetMessageProducer(Request)); }
         }
 
         private ISessionFactory sessionFactory;
@@ -532,7 +558,28 @@ namespace ServiceStack.Razor
         public ResponseStatus GetErrorStatus()
         {
             var errorStatus = this.Request.GetItem(HtmlFormat.ErrorStatusKey);
-            return errorStatus as ResponseStatus;
+            return errorStatus as ResponseStatus 
+                ?? GetResponseStatus(ModelError);
+        }
+        
+        private static ResponseStatus GetResponseStatus(object response)
+        {
+            if (response == null)
+                return null;
+
+            var status = response as ResponseStatus;
+            if (status != null)
+                return status;
+
+            var hasResponseStatus = response as IHasResponseStatus;
+            if (hasResponseStatus != null)
+                return hasResponseStatus.ResponseStatus;
+
+            var propertyInfo = response.GetType().GetPropertyInfo("ResponseStatus");
+            if (propertyInfo == null)
+                return null;
+
+            return propertyInfo.GetProperty(response) as ResponseStatus;
         }
 
         public MvcHtmlString GetErrorMessage()
@@ -568,23 +615,37 @@ namespace ServiceStack.Razor
 
         public bool RenderErrorIfAny()
         {
-            if (!IsError) return false;
+            var html = GetErrorHtml(GetErrorStatus());
+            if (html == null)
+                return false;
 
-            var responseStatus = GetErrorStatus();
+            WriteLiteral(html);
+
+            return true;
+        }
+
+        public MvcHtmlString GetErrorHtml()
+        {
+            return MvcHtmlString.Create(GetErrorHtml(GetErrorStatus()) ?? "");
+        }
+
+        private string GetErrorHtml(ResponseStatus responseStatus)
+        {
+            if (responseStatus == null) return null;
+
             var stackTrace = responseStatus.StackTrace != null
                 ? "<pre>" + responseStatus.StackTrace + "</pre>"
                 : "";
 
-            WriteLiteral(@"
-            <div id=""error-response"" class=""alert alert-danger"">
-                <h4>" + 
-                    responseStatus.ErrorCode + ": " + 
-                    responseStatus.Message + @"
-                </h4>" + 
-                stackTrace + 
-            "</div>");
-
-            return true;
+            var html = @"
+                <div id=""error-response"" class=""alert alert-danger"">
+                    <h4>" +
+                        responseStatus.ErrorCode + ": " +
+                        responseStatus.Message + @"
+                    </h4>" +
+                    stackTrace +
+                "</div>";
+            return html;
         }
     }
 }

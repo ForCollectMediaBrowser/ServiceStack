@@ -90,7 +90,7 @@ namespace ServiceStack.Server.Tests.Messaging
             var reverseCalled = 0;
 
             var mqHost = CreateMqServer();
-            mqHost.RegisterHandler<Reverse>(x => { reverseCalled++; return x.GetBody().Value.Reverse(); });
+            mqHost.RegisterHandler<Reverse>(x => { Interlocked.Increment(ref reverseCalled); return x.GetBody().Value.Reverse(); });
 
             var mqClient = mqHost.CreateMessageQueueClient();
             Publish_4_messages(mqClient);
@@ -120,11 +120,11 @@ namespace ServiceStack.Server.Tests.Messaging
             var rot13Called = 0;
 
             mqHost.RegisterHandler<Reverse>(x => {
-                "Processing Reverse {0}...".Print(++reverseCalled); 
+                "Processing Reverse {0}...".Print(Interlocked.Increment(ref reverseCalled)); 
                 return x.GetBody().Value.Reverse();
             });
             mqHost.RegisterHandler<Rot13>(x => {
-                "Processing Rot13 {0}...".Print(++rot13Called);
+                "Processing Rot13 {0}...".Print(Interlocked.Increment(ref rot13Called));
                 return x.GetBody().Value.ToRot13();
             });
 
@@ -248,8 +248,8 @@ namespace ServiceStack.Server.Tests.Messaging
             var reverseCalled = 0;
             var rot13Called = 0;
 
-            mqHost.RegisterHandler<Reverse>(x => { reverseCalled++; return x.GetBody().Value.Reverse(); });
-            mqHost.RegisterHandler<Rot13>(x => { rot13Called++; return x.GetBody().Value.ToRot13(); });
+            mqHost.RegisterHandler<Reverse>(x => { Interlocked.Increment(ref reverseCalled); return x.GetBody().Value.Reverse(); });
+            mqHost.RegisterHandler<Rot13>(x => { Interlocked.Increment(ref rot13Called); return x.GetBody().Value.ToRot13(); });
             mqHost.RegisterHandler<AlwaysThrows>(x => { throw new Exception("Always Throwing! " + x.GetBody().Value); });
             mqHost.Start();
 
@@ -299,7 +299,7 @@ namespace ServiceStack.Server.Tests.Messaging
 
             mqHost.RegisterHandler<Incr>(m => {
                 Debug.WriteLine("In Incr #" + m.GetBody().Value);
-                called++;
+                Interlocked.Increment(ref called);
                 return m.GetBody().Value > 0 ? new Incr { Value = m.GetBody().Value - 1 } : null;
             });
 
@@ -315,8 +315,18 @@ namespace ServiceStack.Server.Tests.Messaging
             Assert.That(called, Is.EqualTo(1 + incr.Value));
         }
 
-        public class Hello { public string Name { get; set; } }
-        public class HelloResponse { public string Result { get; set; } }
+        public class Hello : IReturn<HelloResponse>
+        {
+            public string Name { get; set; }
+        }
+        public class HelloNull : IReturn<HelloResponse>
+        {
+            public string Name { get; set; }
+        }
+        public class HelloResponse
+        {
+            public string Result { get; set; }
+        }
 
         [Test]
         public void Can_receive_and_process_standard_request_reply_combo()
@@ -386,7 +396,7 @@ namespace ServiceStack.Server.Tests.Messaging
             }
 
             mqHost.RegisterHandler<Wait>(m => {
-                timesCalled++;
+                Interlocked.Increment(ref timesCalled);
                 Thread.Sleep(m.GetBody().ForMs);
                 return null;
             }, noOfThreads);
@@ -473,7 +483,68 @@ namespace ServiceStack.Server.Tests.Messaging
                 var msg = basicMsg.ToMessage<HelloResponse>();
                 Assert.That(msg.GetBody().Result, Is.EqualTo("Hello, Bugs Bunny!"));
             }
+        }
 
+        [Test]
+        public void Messages_with_null_Response_is_published_to_OutMQ()
+        {
+            int msgsReceived = 0;
+            var mqServer = CreateMqServer();
+            mqServer.RegisterHandler<HelloNull>(m =>
+            {
+                Interlocked.Increment(ref msgsReceived);
+                return null;
+            });
+
+            mqServer.Start();
+
+            using (mqServer)
+            using (var mqClient = mqServer.CreateMessageQueueClient())
+            {
+                mqClient.Publish(new HelloNull { Name = "Into the Void" });
+
+                var msg = mqClient.Get<HelloNull>(QueueNames<HelloNull>.Out, TimeSpan.FromSeconds(5));
+                Assert.That(msg, Is.Not.Null);
+
+                HelloNull response = msg.GetBody();
+
+                Thread.Sleep(100);
+
+                Assert.That(response.Name, Is.EqualTo("Into the Void"));
+                Assert.That(msgsReceived, Is.EqualTo(1));
+            }
+        }
+
+        [Test]
+        public void Messages_with_null_Response_is_published_to_ReplyMQ()
+        {
+            int msgsReceived = 0;
+            var mqServer = CreateMqServer();
+            mqServer.RegisterHandler<HelloNull>(m =>
+            {
+                Interlocked.Increment(ref msgsReceived);
+                return null;
+            });
+
+            mqServer.Start();
+
+            using (mqServer)
+            using (var mqClient = mqServer.CreateMessageQueueClient())
+            {
+                var replyMq = mqClient.GetTempQueueName();
+                mqClient.Publish(new Message<HelloNull>(new HelloNull { Name = "Into the Void" }) {
+                    ReplyTo = replyMq
+                });
+
+                var msg = mqClient.Get<HelloNull>(replyMq);
+
+                HelloNull response = msg.GetBody();
+
+                Thread.Sleep(100);
+
+                Assert.That(response.Name, Is.EqualTo("Into the Void"));
+                Assert.That(msgsReceived, Is.EqualTo(1));
+            }
         }
     }
 }

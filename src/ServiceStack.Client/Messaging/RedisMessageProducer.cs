@@ -8,36 +8,36 @@ using ServiceStack.Text;
 
 namespace ServiceStack.Messaging
 {
-	public class RedisMessageProducer
-		: IMessageProducer, IOneWayClient 
-	{
-		private readonly IRedisClientsManager clientsManager;
-		private readonly Action onPublishedCallback;
+    public class RedisMessageProducer
+        : IMessageProducer, IOneWayClient
+    {
+        private readonly IRedisClientsManager clientsManager;
+        private readonly Action onPublishedCallback;
 
-		public RedisMessageProducer(IRedisClientsManager clientsManager)
-			: this(clientsManager, null) {}
+        public RedisMessageProducer(IRedisClientsManager clientsManager)
+            : this(clientsManager, null) { }
 
-		public RedisMessageProducer(IRedisClientsManager clientsManager, Action onPublishedCallback)
-		{
-			this.clientsManager = clientsManager;
-			this.onPublishedCallback = onPublishedCallback;
-		}
+        public RedisMessageProducer(IRedisClientsManager clientsManager, Action onPublishedCallback)
+        {
+            this.clientsManager = clientsManager;
+            this.onPublishedCallback = onPublishedCallback;
+        }
 
-		private IRedisNativeClient readWriteClient;
-		public IRedisNativeClient ReadWriteClient
-		{
-			get
-			{
-				if (this.readWriteClient == null)
-				{
-					this.readWriteClient = (IRedisNativeClient)clientsManager.GetClient();
-				}
-				return readWriteClient;
-			}
-		}
+        private IRedisNativeClient readWriteClient;
+        public IRedisNativeClient ReadWriteClient
+        {
+            get
+            {
+                if (this.readWriteClient == null)
+                {
+                    this.readWriteClient = (IRedisNativeClient)clientsManager.GetClient();
+                }
+                return readWriteClient;
+            }
+        }
 
-		public void Publish<T>(T messageBody)
-		{
+        public void Publish<T>(T messageBody)
+        {
             var message = messageBody as IMessage;
             if (message != null)
             {
@@ -64,48 +64,33 @@ namespace ServiceStack.Messaging
             Publish(queueName, MessageFactory.Create(requestDto));
         }
 
-	    public void SendAllOneWay<TResponse>(IEnumerable<IReturn<TResponse>> requests)
-	    {
-	        throw new NotImplementedException();
-	    }
-
-	    public void Publish(string queueName, IMessage message)
+        public void SendAllOneWay(IEnumerable<object> requests)
         {
-            using (__requestAccess())
+            if (requests == null) return;
+            foreach (var request in requests)
             {
-                var messageBytes = message.ToBytes();
-                this.ReadWriteClient.LPush(queueName, messageBytes);
-                this.ReadWriteClient.Publish(QueueNames.TopicIn, queueName.ToUtf8Bytes());
-
-                if (onPublishedCallback != null)
-                {
-                    onPublishedCallback();
-                }
+                SendOneWay(request);
             }
         }
 
-        private class AccessToken
+        public void Publish(string queueName, IMessage message)
         {
-            private string token;
-            internal static readonly AccessToken __accessToken =
-                new AccessToken("lUjBZNG56eE9yd3FQdVFSTy9qeGl5dlI5RmZwamc4U05udl000");
-            private AccessToken(string token)
+            var messageBytes = message.ToBytes();
+            this.ReadWriteClient.LPush(queueName, messageBytes);
+            this.ReadWriteClient.Publish(QueueNames.TopicIn, queueName.ToUtf8Bytes());
+
+            if (onPublishedCallback != null)
             {
-                this.token = token;
+                onPublishedCallback();
             }
         }
 
-        protected IDisposable __requestAccess()
+        public void Dispose()
         {
-            return LicenseUtils.RequestAccess(AccessToken.__accessToken, LicenseFeature.Client, LicenseFeature.Text);
+            if (readWriteClient != null)
+            {
+                readWriteClient.Dispose();
+            }
         }
-
-		public void Dispose()
-		{
-			if (readWriteClient != null)
-			{
-				readWriteClient.Dispose();
-			}
-		}
-	}
+    }
 }

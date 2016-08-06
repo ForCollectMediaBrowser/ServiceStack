@@ -24,7 +24,7 @@ namespace ServiceStack.AspNet
         /// </summary>
         public virtual string UnauthorizedRedirectUrl
         {
-            get { return HostContext.GetPlugin<AuthFeature>().GetHtmlRedirect() + "?redirect={0}#f=Unauthorized"; }
+            get { return HostContext.GetPlugin<AuthFeature>().GetHtmlRedirect(); }
         }
 
         /// <summary>
@@ -32,7 +32,7 @@ namespace ServiceStack.AspNet
         /// </summary>
         public virtual string ForbiddenRedirectUrl
         {
-            get { return HostContext.GetPlugin<AuthFeature>().GetHtmlRedirect() + "?redirect={0}#f=Forbidden"; }
+            get { return HostContext.GetPlugin<AuthFeature>().GetHtmlRedirect(); }
         }
 
         protected virtual void ServiceStack_PreLoad(object sender, EventArgs e)
@@ -44,9 +44,17 @@ namespace ServiceStack.AspNet
             {
                 var authError = authAttr != null && authAttr.HtmlRedirect != null
                     ? authAttr.HtmlRedirect.AddQueryParam("redirect", Request.Url.PathAndQuery)
-                    : UnauthorizedRedirectUrl.Fmt(Request.Url.PathAndQuery.UrlEncode());
+                    : UnauthorizedRedirectUrl != null ? UnauthorizedRedirectUrl + "?redirect={0}#f=Unauthorized".Fmt(Request.Url.PathAndQuery.UrlEncode()) : null;
 
-                base.Response.Redirect(authError);
+                if (authError != null)
+                {
+                    base.Response.Redirect(authError);
+                }
+                else
+                {
+                    base.Response.StatusCode = 401;
+                    base.Response.StatusDescription = "Unauthorized";
+                }
                 return;
             }
 
@@ -58,9 +66,17 @@ namespace ServiceStack.AspNet
             {
                 var authError = authAttr != null && authAttr.HtmlRedirect != null
                     ? authAttr.HtmlRedirect.AddQueryParam("redirect", Request.Url.PathAndQuery)
-                    : ForbiddenRedirectUrl.Fmt(Request.Url.PathAndQuery.UrlEncode());
+                    : ForbiddenRedirectUrl != null ? ForbiddenRedirectUrl + "?redirect={0}#f=Forbidden".Fmt(Request.Url.PathAndQuery.UrlEncode()) : null;
 
-                base.Response.Redirect(authError);
+                if (authError != null)
+                {
+                    base.Response.Redirect(authError);
+                }
+                else
+                {
+                    base.Response.StatusCode = 403;
+                    base.Response.StatusDescription = "Forbidden";
+                }
                 return;
             }
         }
@@ -98,10 +114,6 @@ namespace ServiceStack.AspNet
         {
             get { return ServiceStackProvider.Redis; }
         }
-        public virtual IMessageFactory MessageFactory
-        {
-            get { return ServiceStackProvider.MessageFactory; }
-        }
         public virtual IMessageProducer MessageProducer
         {
             get { return ServiceStackProvider.MessageProducer; }
@@ -118,22 +130,6 @@ namespace ServiceStack.AspNet
         {
             get { return ServiceStackProvider.IsAuthenticated; }
         }
-        public virtual T TryResolve<T>()
-        {
-            return ServiceStackProvider.TryResolve<T>();
-        }
-        public virtual T ResolveService<T>()
-        {
-            return ServiceStackProvider.ResolveService<T>();
-        }
-        public virtual object Execute(object requestDto)
-        {
-            return ServiceStackProvider.Execute(requestDto);
-        }
-        public virtual object ForwardRequestToServiceStack(IRequest request = null)
-        {
-            return ServiceStackProvider.Execute(request ?? ServiceStackProvider.Request);
-        }
         public virtual IAuthSession GetSession(bool reload = true)
         {
             return ServiceStackProvider.GetSession(reload);
@@ -142,16 +138,54 @@ namespace ServiceStack.AspNet
         {
             return ServiceStackProvider.SessionAs<TUserSession>();
         }
+        protected virtual void SaveSession(IAuthSession session, TimeSpan? expiresIn = null)
+        {
+            ServiceStackProvider.Request.SaveSession(session, expiresIn);
+        }
         public virtual void ClearSession()
         {
             ServiceStackProvider.ClearSession();
         }
-        public virtual void PublishMessage<T>(T message)
+        public virtual T TryResolve<T>()
+        {
+            return ServiceStackProvider.TryResolve<T>();
+        }
+        public virtual T ResolveService<T>()
+        {
+            return ServiceStackProvider.ResolveService<T>();
+        }
+        public virtual object ForwardRequestToServiceStack(IRequest request = null)
+        {
+            return ServiceStackProvider.Execute(request ?? ServiceStackProvider.Request);
+        }
+
+        public virtual IServiceGateway Gateway
+        {
+            get { return ServiceStackProvider.Gateway; }
+        }
+        [Obsolete("Use Gateway")]
+        protected virtual object Execute(object requestDto)
+        {
+            return ServiceStackProvider.Execute(requestDto);
+        }
+        [Obsolete("Use Gateway")]
+        protected virtual TResponse Execute<TResponse>(IReturn<TResponse> requestDto)
+        {
+            return ServiceStackProvider.Execute(requestDto);
+        }
+        [Obsolete("Use Gateway")]
+        protected virtual void PublishMessage<T>(T message)
         {
             ServiceStackProvider.PublishMessage(message);
         }
+
+        private bool hasDisposed = false;
         public override void Dispose()
         {
+            if (hasDisposed)
+                return;
+
+            hasDisposed = true;
             base.Dispose();
 
             if (serviceStackProvider != null)
@@ -159,6 +193,13 @@ namespace ServiceStack.AspNet
                 serviceStackProvider.Dispose();
                 serviceStackProvider = null;
             }
+
+            EndServiceStackRequest();
+        }
+
+        public virtual void EndServiceStackRequest()
+        {
+            HostContext.AppHost.OnEndRequest(ServiceStackRequest);
         }
     }
 }

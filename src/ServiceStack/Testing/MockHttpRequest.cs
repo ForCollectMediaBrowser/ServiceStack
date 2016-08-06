@@ -22,7 +22,7 @@ namespace ServiceStack.Testing
             this.Cookies = new Dictionary<string, Cookie>();
             this.Items = new Dictionary<string, object>();
             this.Container = ServiceStackHost.Instance != null ? ServiceStackHost.Instance.Container : new Container();
-            this.Response = new MockHttpResponse();
+            this.Response = new MockHttpResponse(this);
         }
 
         public MockHttpRequest(string operationName, string httpMethod,
@@ -136,10 +136,12 @@ namespace ServiceStack.Testing
         public string UserHostAddress { get; set; }
 
         public string RemoteIp { get; set; }
+        public string Authorization { get; set; }
         public string XForwardedFor { get; set; }
         public int? XForwardedPort { get; set; }
         public string XForwardedProtocol { get; set; }
         public string XRealIp { get; set; }
+        public string Accept { get; set; }
 
         public bool IsSecureConnection { get; set; }
         public string[] AcceptTypes { get; set; }

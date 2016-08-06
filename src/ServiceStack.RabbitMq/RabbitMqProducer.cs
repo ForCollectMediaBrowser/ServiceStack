@@ -50,7 +50,7 @@ namespace ServiceStack.RabbitMq
             this.msgFactory = msgFactory;
         }
 
-        public void Publish<T>(T messageBody)
+        public virtual void Publish<T>(T messageBody)
         {
             var message = messageBody as IMessage;
             if (message != null)
@@ -62,61 +62,71 @@ namespace ServiceStack.RabbitMq
                 Publish(new Message<T>(messageBody));
             }
         }
- 
-        public void Publish<T>(IMessage<T> message)
+
+        public virtual void Publish<T>(IMessage<T> message)
         {
             Publish(message.ToInQueueName(), message);
         }
 
-        public void Publish(string queueName, IMessage message)
+        public virtual void Publish(string queueName, IMessage message)
         {
             Publish(queueName, message, QueueNames.Exchange);
         }
 
-        public void SendOneWay(object requestDto)
+        public virtual void SendOneWay(object requestDto)
         {
             Publish(MessageFactory.Create(requestDto));
         }
 
-        public void SendOneWay(string queueName, object requestDto)
+        public virtual void SendOneWay(string queueName, object requestDto)
         {
             Publish(queueName, MessageFactory.Create(requestDto));
         }
 
-        public void SendAllOneWay<TResponse>(IEnumerable<IReturn<TResponse>> requests)
+        public virtual void SendAllOneWay(IEnumerable<object> requests)
         {
-            throw new NotImplementedException();
+            if (requests == null) return;
+            foreach (var request in requests)
+            {
+                SendOneWay(request);
+            }
         }
 
-        public void Publish(string queueName, IMessage message, string exchange)
+        public virtual void Publish(string queueName, IMessage message, string exchange)
         {
-            using (__requestAccess())
+            var props = Channel.CreateBasicProperties();
+            props.Persistent = true;
+            props.PopulateFromMessage(message);
+
+            if (message.Meta != null)
             {
-                var props = Channel.CreateBasicProperties();
-                props.SetPersistent(true);
-                props.PopulateFromMessage(message);
-
-                if (PublishMessageFilter != null)
+                props.Headers = new Dictionary<string, object>();
+                foreach (var entry in message.Meta)
                 {
-                    PublishMessageFilter(queueName, props, message);
+                    props.Headers[entry.Key] = entry.Value;
                 }
+            }
 
-                var messageBytes = message.Body.ToJson().ToUtf8Bytes();
+            if (PublishMessageFilter != null)
+            {
+                PublishMessageFilter(queueName, props, message);
+            }
 
-                PublishMessage(exchange ?? QueueNames.Exchange,
-                    routingKey: queueName,
-                    basicProperties: props, body: messageBytes);
+            var messageBytes = message.Body.ToJson().ToUtf8Bytes();
 
-                if (OnPublishedCallback != null)
-                {
-                    OnPublishedCallback();
-                }
+            PublishMessage(exchange ?? QueueNames.Exchange,
+                routingKey: queueName,
+                basicProperties: props, body: messageBytes);
+
+            if (OnPublishedCallback != null)
+            {
+                OnPublishedCallback();
             }
         }
 
         static HashSet<string> Queues = new HashSet<string>();
 
-        public void PublishMessage(string exchange, string routingKey, IBasicProperties basicProperties, byte[] body)
+        public virtual void PublishMessage(string exchange, string routingKey, IBasicProperties basicProperties, byte[] body)
         {
             try
             {
@@ -158,7 +168,7 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public BasicGetResult GetMessage(string queueName, bool noAck)
+        public virtual BasicGetResult GetMessage(string queueName, bool noAck)
         {
             try
             {
@@ -187,22 +197,6 @@ namespace ServiceStack.RabbitMq
                 }
                 throw;
             }
-        }
-
-        private class AccessToken
-        {
-            private string token;
-            internal static readonly AccessToken __accessToken =
-                new AccessToken("lUjBZNG56eE9yd3FQdVFSTy9qeGl5dlI5RmZwamc4U05udl000");
-            private AccessToken(string token)
-            {
-                this.token = token;
-            }
-        }
-
-        protected IDisposable __requestAccess()
-        {
-            return LicenseUtils.RequestAccess(AccessToken.__accessToken, LicenseFeature.Client, LicenseFeature.Text);
         }
 
         public virtual void Dispose()

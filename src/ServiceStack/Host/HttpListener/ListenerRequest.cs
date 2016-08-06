@@ -9,6 +9,7 @@ using System.Net;
 using System.Text;
 using System.Web;
 using Funq;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack.Host.HttpListener
@@ -24,7 +25,7 @@ namespace ServiceStack.Host.HttpListener
             this.OperationName = operationName;
             this.RequestAttributes = requestAttributes;
             this.request = httpContext.Request;
-            this.response = new ListenerResponse(httpContext.Response);
+            this.response = new ListenerResponse(httpContext.Response, this);
 
             this.RequestPreferences = new RequestPreferences(this);
         }
@@ -72,15 +73,13 @@ namespace ServiceStack.Host.HttpListener
 
         public string GetRawBody()
         {
-            if (bufferedStream != null)
+            if (BufferedStream != null)
             {
-                return bufferedStream.ToArray().FromUtf8Bytes();
+                return BufferedStream.ToArray().FromUtf8Bytes();
             }
 
-            using (var reader = new StreamReader(InputStream))
-            {
-                return reader.ReadToEnd();
-            }
+            var reader = new StreamReader(InputStream);
+            return reader.ReadToEnd();
         }
 
         public string RawUrl
@@ -95,7 +94,12 @@ namespace ServiceStack.Host.HttpListener
 
         public string UserHostAddress
         {
-            get { return request.UserHostAddress; }
+            get
+            {
+                return request.RemoteEndPoint != null 
+                    ? request.RemoteEndPoint.Address.ToString() 
+                    : request.UserHostAddress;
+            }
         }
 
         public string XForwardedFor
@@ -126,7 +130,15 @@ namespace ServiceStack.Host.HttpListener
         {
             get
             {
-                return String.IsNullOrEmpty(request.Headers[HttpHeaders.XRealIp]) ? null : request.Headers[HttpHeaders.XRealIp];
+                return string.IsNullOrEmpty(request.Headers[HttpHeaders.XRealIp]) ? null : request.Headers[HttpHeaders.XRealIp];
+            }
+        }
+
+        public string Accept
+        {
+            get
+            {
+                return string.IsNullOrEmpty(request.Headers[HttpHeaders.Accept]) ? null : request.Headers[HttpHeaders.Accept];
             }
         }
 
@@ -139,6 +151,14 @@ namespace ServiceStack.Host.HttpListener
                     (remoteIp = XForwardedFor ??
                                 (XRealIp ??
                                 ((request.RemoteEndPoint != null) ? request.RemoteEndPoint.Address.ToString() : null)));
+            }
+        }
+
+        public string Authorization
+        {
+            get
+            {
+                return string.IsNullOrEmpty(request.Headers[HttpHeaders.Authorization]) ? null : request.Headers[HttpHeaders.Authorization];
             }
         }
 
@@ -305,19 +325,19 @@ namespace ServiceStack.Host.HttpListener
 
         public bool UseBufferedStream
         {
-            get { return bufferedStream != null; }
+            get { return BufferedStream != null; }
             set
             {
-                bufferedStream = value
-                    ? bufferedStream ?? new MemoryStream(request.InputStream.ReadFully())
+                BufferedStream = value
+                    ? BufferedStream ?? new MemoryStream(request.InputStream.ReadFully())
                     : null;
             }
         }
 
-        private MemoryStream bufferedStream;
+        public MemoryStream BufferedStream { get; set; }
         public Stream InputStream
         {
-            get { return bufferedStream ?? request.InputStream; }
+            get { return BufferedStream ?? request.InputStream; }
         }
 
         public long ContentLength
@@ -333,15 +353,15 @@ namespace ServiceStack.Host.HttpListener
                 if (httpFiles == null)
                 {
                     if (files == null)
-                        return httpFiles = new IHttpFile[0];
+                        return httpFiles = TypeConstants<IHttpFile>.EmptyArray;
 
                     httpFiles = new IHttpFile[files.Count];
-                    for (var i = 0; i < files.Count; i++)
+                    for (int i = 0; i < files.Count; i++)
                     {
                         var reqFile = files[i];
-
                         httpFiles[i] = new HttpFile
                         {
+                            Name = files.AllKeys[i],
                             ContentType = reqFile.ContentType,
                             ContentLength = reqFile.ContentLength,
                             FileName = reqFile.FileName,

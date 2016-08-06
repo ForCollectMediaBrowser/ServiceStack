@@ -1,15 +1,15 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Web;
 using System.Web.UI;
 using ServiceStack.Host;
-using ServiceStack.NativeTypes;
 using ServiceStack.Support.WebHost;
 using ServiceStack.Web;
 using System.Text;
+using System.Threading.Tasks;
+using ServiceStack.Text;
 
 namespace ServiceStack.Metadata
 {
@@ -23,7 +23,7 @@ namespace ServiceStack.Metadata
         public override void Execute(HttpContextBase context)
         {
             var writer = new HtmlTextWriter(context.Response.Output);
-            context.Response.ContentType = "text/html";
+            context.Response.ContentType = "text/html; charset=utf-8";
 
             var request = context.ToRequest();
             ProcessOperations(writer, request, request.Response);
@@ -31,12 +31,17 @@ namespace ServiceStack.Metadata
 
         public override void ProcessRequest(IRequest httpReq, IResponse httpRes, string operationName)
         {
+            if (HostContext.ApplyCustomHandlerRequestFilters(httpReq, httpRes))
+                return;
+
             using (var sw = new StreamWriter(httpRes.OutputStream))
             {
                 var writer = new HtmlTextWriter(sw);
-                httpRes.ContentType = "text/html";
-                ProcessOperations(writer, httpReq, httpRes);
+               httpRes.ContentType = "text/html; charset=utf-8";
+               ProcessOperations(writer, httpReq, httpRes);
             }
+
+            httpRes.EndHttpHandlerRequest(skipHeaders:true);
         }
 
         public virtual string CreateResponse(Type type)
@@ -49,8 +54,8 @@ namespace ServiceStack.Metadata
                 return "(Stream)";
             if (type == typeof(HttpWebResponse))
                 return "(HttpWebResponse)";
-            if (type.IsGenericType)
-                type = type.GetGenericArguments()[0]; //e.g. Task<T> => T
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
+                type = type.GetGenericArguments()[0]; 
 
             return CreateMessage(type);
         }
@@ -65,7 +70,7 @@ namespace ServiceStack.Metadata
             var metadata = HostContext.Metadata;
             if (operationName != null)
             {
-                var allTypes = metadata.GetAllTypes();
+                var allTypes = metadata.GetAllOperationTypes();
                 //var operationType = allTypes.Single(x => x.Name == operationName);
                 var operationType = allTypes.Single(x => x.GetOperationName() == operationName);
                 var op = metadata.GetOperation(operationType);
@@ -79,11 +84,43 @@ namespace ServiceStack.Metadata
                 }
 
                 var isSoap = Format == Format.Soap11 || Format == Format.Soap12;
-                var sb = new StringBuilder();
+                var sb = StringBuilderCache.Allocate();
                 var description = operationType.GetDescription();
                 if (!description.IsNullOrEmpty())
                 {
                     sb.AppendFormat("<h3 id='desc'>{0}</div>", ConvertToHtml(description));
+                }
+
+                if (op.RequiresAuthentication)
+                {
+                    sb.AppendLine("<table class='authentication'>" +
+                        "<caption><b>Requires Authentication</b><i class='auth' style='display:inline-block;margin:0 0 -4px 5px;'></i></caption>");
+                    sb.Append("<tr>");
+
+                    if (!op.RequiredRoles.IsEmpty())
+                    {
+                        var plural = op.RequiredRoles.Count > 1 ? "s" : "";
+                        sb.Append("<td>Required role{0}:</td><td>{1}</td>".Fmt(plural, string.Join(", ", op.RequiredRoles)));
+                    }
+                    if (!op.RequiresAnyRole.IsEmpty())
+                    {
+                        var plural = op.RequiresAnyRole.Count > 1 ? "Requires any of the roles" : "Requires the role";
+                        sb.Append("<td>{0}:</td><td>{1}</td>".Fmt(plural, string.Join(", ", op.RequiresAnyRole)));
+                    }
+
+                    if (!op.RequiredPermissions.IsEmpty())
+                    {
+                        var plural = op.RequiredPermissions.Count > 1 ? "s" : "";
+                        sb.Append("<td>Required permission{0}:</td><td>{1}</td>".Fmt(plural, string.Join(", ", op.RequiredPermissions)));
+                    }
+                    if (!op.RequiresAnyPermission.IsEmpty())
+                    {
+                        var plural = op.RequiresAnyPermission.Count > 1 ? "Requires any of the permissions" : "Requires the permission";
+                        sb.Append("<td>{0}:</td><td>{1}</td>".Fmt(plural, string.Join(", ", op.RequiresAnyPermission)));
+                    }
+
+                    sb.Append("</tr>");
+                    sb.Append("</table>");
                 }
 
                 if (op.Routes.Count > 0)
@@ -134,7 +171,8 @@ namespace ServiceStack.Metadata
                 }
                 sb.Append("</div>");
 
-                RenderOperation(writer, httpReq, operationName, requestMessage, responseMessage, sb.ToString());
+                RenderOperation(writer, httpReq, operationName, requestMessage, responseMessage,
+                    StringBuilderCache.ReturnAndFree(sb));
                 return;
             }
 
@@ -188,7 +226,7 @@ namespace ServiceStack.Metadata
         {
             var defaultPage = new IndexOperationsControl
             {
-                HttpRequest = httpReq,
+                Request = httpReq,
                 MetadataConfig = HostContext.MetadataPagesConfig,
                 Title = HostContext.ServiceName,
                 Xsds = XsdTypes.Xsds,

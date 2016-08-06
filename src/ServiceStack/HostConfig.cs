@@ -57,68 +57,83 @@ namespace ServiceStack
                 UseHttpsLinks = false,
                 DebugMode = false,
                 DefaultDocuments = new List<string> {
-	                "default.htm",
-	                "default.html",
-	                "default.cshtml",
-	                "default.md",
-	                "index.htm",
-	                "index.html",
-	                "default.aspx",
-	                "default.ashx",
+                    "default.htm",
+                    "default.html",
+                    "default.cshtml",
+                    "default.md",
+                    "index.htm",
+                    "index.html",
+                    "default.aspx",
+                    "default.ashx",
                 },
                 GlobalResponseHeaders = new Dictionary<string, string> {
                     { "Vary", "Accept" },
                     { "X-Powered-By", Env.ServerUserAgent },
                 },
-                IgnoreFormatsInMetadata = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                IgnoreFormatsInMetadata = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                },
                 AllowFileExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    "js", "css", "htm", "html", "shtm", "txt", "xml", "rss", "csv", "pdf",  
+                    "js", "ts", "tsx", "jsx", "css", "htm", "html", "shtm", "txt", "xml", "rss", "csv", "pdf",
                     "jpg", "jpeg", "gif", "png", "bmp", "ico", "tif", "tiff", "svg",
-                    "avi", "divx", "m3u", "mov", "mp3", "mpeg", "mpg", "qt", "vob", "wav", "wma", "wmv", 
-                    "flv", "swf", "xap", "xaml", "ogg", "mp4", "webm", "eot", "ttf", "woff", "map"
+                    "avi", "divx", "m3u", "mov", "mp3", "mpeg", "mpg", "qt", "vob", "wav", "wma", "wmv",
+                    "flv", "swf", "xap", "xaml", "ogg", "ogv", "mp4", "webm", "eot", "ttf", "woff", "woff2", "map"
                 },
                 DebugAspNetHostEnvironment = Env.IsMono ? "FastCGI" : "IIS7",
                 DebugHttpListenerHostEnvironment = Env.IsMono ? "XSP" : "WebServer20",
                 EnableFeatures = Feature.All,
                 WriteErrorsToResponse = true,
                 ReturnsInnerException = true,
+                DisposeDependenciesAfterUse = true,
+                LogUnobservedTaskExceptions = true,
                 MarkdownOptions = new MarkdownOptions(),
                 MarkdownBaseType = typeof(MarkdownViewBase),
                 MarkdownGlobalHelpers = new Dictionary<string, Type>(),
                 HtmlReplaceTokens = new Dictionary<string, string>(),
                 AddMaxAgeForStaticMimeTypes = new Dictionary<string, TimeSpan> {
-		            { "image/gif", TimeSpan.FromHours(1) },
-		            { "image/png", TimeSpan.FromHours(1) },
-		            { "image/jpeg", TimeSpan.FromHours(1) },
-	            },
+                    { "image/gif", TimeSpan.FromHours(1) },
+                    { "image/png", TimeSpan.FromHours(1) },
+                    { "image/jpeg", TimeSpan.FromHours(1) },
+                },
                 AppendUtf8CharsetOnContentTypes = new HashSet<string> { MimeTypes.Json, },
                 RouteNamingConventions = new List<RouteNamingConventionDelegate> {
-		            RouteNamingConvention.WithRequestDtoName,
-		            RouteNamingConvention.WithMatchingAttributes,
-		            RouteNamingConvention.WithMatchingPropertyNames
+                    RouteNamingConvention.WithRequestDtoName,
+                    RouteNamingConvention.WithMatchingAttributes,
+                    RouteNamingConvention.WithMatchingPropertyNames
                 },
                 MapExceptionToStatusCode = new Dictionary<Type, int>(),
                 OnlySendSessionCookiesSecurely = false,
+                AllowSessionIdsInHttpParams = false,
+                AllowSessionCookies = true,
                 RestrictAllCookiesToDomain = null,
                 DefaultJsonpCacheExpiration = new TimeSpan(0, 20, 0),
                 MetadataVisibility = RequestAttributes.Any,
                 Return204NoContentForEmptyResponse = true,
+                AllowJsConfig = true,
                 AllowPartialResponses = true,
                 AllowAclUrlReservation = true,
+                AddRedirectParamsToQueryString = false,
                 RedirectToDefaultDocuments = false,
                 StripApplicationVirtualPath = false,
                 ScanSkipPaths = new List<string> {
-                    "/obj/", 
-                    "/bin/",
+                    "obj/",
+                    "bin/",
+                    "node_modules/",
+                    "jspm_packages/",
+                    "bower_components/",
+                    "wwwroot/",
+                    "wwwroot_build/",
                 },
                 IgnoreWarningsOnPropertyNames = new List<string> {
-                    "format", "callback", "debug", "_", "authsecret", "Version", "version"
+                    Keywords.Format, Keywords.Callback, Keywords.Debug, Keywords.AuthSecret,
+                    Keywords.IgnorePlaceHolder, Keywords.Version, Keywords.VersionAbbr, Keywords.Version.ToPascalCase(),
                 },
                 XmlWriterSettings = new XmlWriterSettings
                 {
-                    Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier:false),
-                }
+                    Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                },
+                FallbackRestPath = null,
             };
 
             if (config.HandlerFactoryPath == null)
@@ -161,6 +176,8 @@ namespace ServiceStack
             this.AllowFileExtensions = instance.AllowFileExtensions;
             this.EnableFeatures = instance.EnableFeatures;
             this.WriteErrorsToResponse = instance.WriteErrorsToResponse;
+            this.DisposeDependenciesAfterUse = instance.DisposeDependenciesAfterUse;
+            this.LogUnobservedTaskExceptions = instance.LogUnobservedTaskExceptions;
             this.ReturnsInnerException = instance.ReturnsInnerException;
             this.MarkdownOptions = instance.MarkdownOptions;
             this.MarkdownBaseType = instance.MarkdownBaseType;
@@ -171,17 +188,22 @@ namespace ServiceStack
             this.RouteNamingConventions = instance.RouteNamingConventions;
             this.MapExceptionToStatusCode = instance.MapExceptionToStatusCode;
             this.OnlySendSessionCookiesSecurely = instance.OnlySendSessionCookiesSecurely;
+            this.AllowSessionIdsInHttpParams = instance.AllowSessionIdsInHttpParams;
+            this.AllowSessionCookies = instance.AllowSessionCookies;
             this.RestrictAllCookiesToDomain = instance.RestrictAllCookiesToDomain;
             this.DefaultJsonpCacheExpiration = instance.DefaultJsonpCacheExpiration;
             this.MetadataVisibility = instance.MetadataVisibility;
-            this.Return204NoContentForEmptyResponse = Return204NoContentForEmptyResponse;
+            this.Return204NoContentForEmptyResponse = instance.Return204NoContentForEmptyResponse;
             this.AllowNonHttpOnlyCookies = instance.AllowNonHttpOnlyCookies;
+            this.AllowJsConfig = instance.AllowJsConfig;
             this.AllowPartialResponses = instance.AllowPartialResponses;
             this.IgnoreWarningsOnPropertyNames = instance.IgnoreWarningsOnPropertyNames;
             this.FallbackRestPath = instance.FallbackRestPath;
             this.AllowAclUrlReservation = instance.AllowAclUrlReservation;
+            this.AddRedirectParamsToQueryString = instance.AddRedirectParamsToQueryString;
             this.RedirectToDefaultDocuments = instance.RedirectToDefaultDocuments;
             this.StripApplicationVirtualPath = instance.StripApplicationVirtualPath;
+            this.SkipFormDataInCreatingRequest = instance.SkipFormDataInCreatingRequest;
             this.ScanSkipPaths = instance.ScanSkipPaths;
             this.AdminAuthSecret = instance.AdminAuthSecret;
         }
@@ -202,7 +224,7 @@ namespace ServiceStack
 
         public string DefaultContentType { get; set; }
         public List<string> PreferredContentTypes { get; set; }
-        internal string[] PreferredContentTypesArray = new string[0]; //use array at runtime
+        internal string[] PreferredContentTypesArray = TypeConstants.EmptyStringArray; //use array at runtime
         public bool AllowJsonpRequests { get; set; }
         public bool AllowRouteContentTypeExtensions { get; set; }
         public bool DebugMode { get; set; }
@@ -232,6 +254,8 @@ namespace ServiceStack
         public Feature EnableFeatures { get; set; }
         public bool ReturnsInnerException { get; set; }
         public bool WriteErrorsToResponse { get; set; }
+        public bool DisposeDependenciesAfterUse { get; set; }
+        public bool LogUnobservedTaskExceptions { get; set; }
 
         public MarkdownOptions MarkdownOptions { get; set; }
         public Type MarkdownBaseType { get; set; }
@@ -247,15 +271,20 @@ namespace ServiceStack
         public Dictionary<Type, int> MapExceptionToStatusCode { get; set; }
 
         public bool OnlySendSessionCookiesSecurely { get; set; }
+        public bool AllowSessionIdsInHttpParams { get; set; }
+        public bool AllowSessionCookies { get; set; }
         public string RestrictAllCookiesToDomain { get; set; }
 
         public TimeSpan DefaultJsonpCacheExpiration { get; set; }
         public bool Return204NoContentForEmptyResponse { get; set; }
+        public bool AllowJsConfig { get; set; }
         public bool AllowPartialResponses { get; set; }
         public bool AllowNonHttpOnlyCookies { get; set; }
         public bool AllowAclUrlReservation { get; set; }
+        public bool AddRedirectParamsToQueryString { get; set; }
         public bool RedirectToDefaultDocuments { get; set; }
         public bool StripApplicationVirtualPath { get; set; }
+        public bool SkipFormDataInCreatingRequest { get; set; }
 
         //Skip scanning common VS.NET extensions
         public List<string> ScanSkipPaths { get; private set; }

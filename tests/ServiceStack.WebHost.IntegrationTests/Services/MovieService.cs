@@ -9,6 +9,11 @@ using ServiceStack.Web;
 
 namespace ServiceStack.WebHost.IntegrationTests.Services
 {
+    [Route("/movies/query", "GET")]
+    public class QueryMovies : QueryDb<Movie>
+    {
+        public string TitleContains { get; set; }
+    }
 
 	[Route("/movies", "POST,PUT,PATCH")]
 	[Route("/movies/{Id}")]

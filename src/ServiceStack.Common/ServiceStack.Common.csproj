@@ -95,9 +95,11 @@
     <Compile Include="ByteArrayExtensions.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="CryptUtils.cs" />
+    <Compile Include="CachedExpressionCompiler.cs" />
     <Compile Include="Data\DbConnectionFactory.cs" />
+    <Compile Include="MiniProfiler\Data\ExecuteType.cs" />
     <Compile Include="Data\IDbConnectionFactory.cs" />
+    <Compile Include="MiniProfiler\Data\IDbProfiler.cs" />
     <Compile Include="Data\IHasDbConnection.cs" />
     <Compile Include="DictionaryExtensions.cs" />
     <Compile Include="DirectoryInfoExtensions.cs">
@@ -115,9 +117,21 @@
     <Compile Include="ExecExtensions.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="ExpressionUtils.cs" />
     <Compile Include="IntExtensions.cs" />
     <Compile Include="Logging\ConsoleLogFactory.cs" />
     <Compile Include="Logging\ConsoleLogger.cs" />
+    <Compile Include="Logging\DebugLogFactory.cs" />
+    <Compile Include="Logging\DebugLogger.cs" />
+    <Compile Include="MiniProfiler\Data\ProfiledCommand.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="MiniProfiler\Data\ProfiledConnection.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="MiniProfiler\Data\ProfiledDbDataReader.cs" />
+    <Compile Include="MiniProfiler\Data\ProfiledProviderFactory.cs" />
+    <Compile Include="MiniProfiler\Data\ProfiledDbTransaction.cs" />
     <Compile Include="Reflection\DelegateFactory.cs">
       <SubType>Code</SubType>
     </Compile>
@@ -136,6 +150,7 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="StringUtils.cs" />
+    <Compile Include="TypeExtensions.cs" />
     <Compile Include="XLinqExtensions.cs">
       <SubType>Code</SubType>
     </Compile>

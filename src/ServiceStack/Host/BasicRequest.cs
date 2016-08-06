@@ -46,11 +46,12 @@ namespace ServiceStack.Host
             Response = new BasicResponse(this);
             this.RequestAttributes = requestAttributes;
 
+            this.Verb = HttpMethods.Post;
             this.Cookies = new Dictionary<string, Cookie>();
             this.Items = new Dictionary<string, object>();
             this.QueryString = PclExportClient.Instance.NewNameValueCollection();
             this.FormData = PclExportClient.Instance.NewNameValueCollection();
-            this.Files = new IHttpFile[0];
+            this.Files = TypeConstants<IHttpFile>.EmptyArray;
         }
 
         private string operationName;
@@ -73,7 +74,7 @@ namespace ServiceStack.Host
             return headerValue;
         }
 
-        public Dictionary<string, object> Items { get; private set; }
+        public Dictionary<string, object> Items { get; set; }
 
         public string UserAgent { get; private set; }
 
@@ -132,6 +133,8 @@ namespace ServiceStack.Host
 
         public string RemoteIp { get; set; }
 
+        public string Authorization { get; set; }
+
         public bool IsSecureConnection { get; set; }
 
         public string[] AcceptTypes { get; set; }
@@ -141,6 +144,19 @@ namespace ServiceStack.Host
         public long ContentLength
         {
             get { return (GetRawBody() ?? "").Length; }
+        }
+
+        public BasicRequest PopulateWith(IRequest request)
+        {
+            this.Headers = request.Headers;
+            this.Cookies = request.Cookies;
+            this.Items = request.Items;
+            this.UserAgent = request.UserAgent;
+            this.RemoteIp = request.RemoteIp;
+            this.UserHostAddress = request.UserHostAddress;
+            this.IsSecureConnection = request.IsSecureConnection;
+            this.AcceptTypes = request.AcceptTypes;
+            return this;
         }
     }
 }

@@ -30,9 +30,10 @@ namespace ServiceStack.ServiceHost.Tests.Formats
 
             appHost = new BasicAppHost
             {
-                ConfigFilter = config => {
+                ConfigFilter = config =>
+                {
                     //Files aren't copied, set RootDirectory to ProjectPath instead.
-                    config.WebHostPhysicalPath = "~".MapProjectPath(); 
+                    config.WebHostPhysicalPath = "~".MapProjectPath();
                 }
             }.Init();
             markdownFormat = appHost.GetPlugin<MarkdownFormat>();
@@ -55,7 +56,7 @@ namespace ServiceStack.ServiceHost.Tests.Formats
             httpReq.QueryString.Add("format", format);
             using (var ms = new MemoryStream())
             {
-                var httpRes = new HttpResponseStreamWrapper(ms);
+                var httpRes = new HttpResponseStreamWrapper(ms, httpReq);
                 appHost.ViewEngines[0].ProcessRequest(httpReq, httpRes, dto);
 
                 var utf8Bytes = ms.ToArray();
@@ -134,17 +135,21 @@ namespace ServiceStack.ServiceHost.Tests.Formats
         {
             public MemoryStream MemoryStream { get; set; }
 
-            public MockHttpResponse()
+            public MockHttpResponse(IRequest httpReq)
             {
+                this.Request = httpReq;
                 this.Headers = new Dictionary<string, string>();
                 this.MemoryStream = new MemoryStream();
                 this.Cookies = new Cookies(this);
+                this.Items = new Dictionary<string, object>();
             }
 
             public object OriginalResponse
             {
                 get { throw new NotImplementedException(); }
             }
+
+            public IRequest Request { get; private set; }
 
             public int StatusCode { set; get; }
 
@@ -159,6 +164,13 @@ namespace ServiceStack.ServiceHost.Tests.Formats
             public void AddHeader(string name, string value)
             {
                 this.Headers.Add(name, value);
+            }
+
+            public string GetHeader(string name)
+            {
+                string value;
+                this.Headers.TryGetValue(name, out value);
+                return value;
             }
 
             public void Redirect(string url)
@@ -206,8 +218,14 @@ namespace ServiceStack.ServiceHost.Tests.Formats
 
             public bool KeepAlive { get; set; }
 
+            public Dictionary<string, object> Items { get; private set; }
+
             public void SetCookie(Cookie cookie)
-            {                
+            {
+            }
+
+            public void ClearCookies()
+            {
             }
         }
 
@@ -219,7 +237,7 @@ namespace ServiceStack.ServiceHost.Tests.Formats
                 MarkdownFormat = markdownFormat,
             };
             var httpReq = new MockHttpRequest { QueryString = PclExportClient.Instance.NewNameValueCollection() };
-            var httpRes = new MockHttpResponse();
+            var httpRes = new MockHttpResponse(httpReq);
             markdownHandler.ProcessRequestAsync(httpReq, httpRes, "Static").Wait();
 
             var expectedHtml = markdownFormat.Transform(

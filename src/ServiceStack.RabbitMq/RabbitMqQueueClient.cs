@@ -10,55 +10,46 @@ namespace ServiceStack.RabbitMq
         public RabbitMqQueueClient(RabbitMqMessageFactory msgFactory)
             : base(msgFactory) {}
 
-        public void Notify(string queueName, IMessage message)
+        public virtual void Notify(string queueName, IMessage message)
         {
-            using (__requestAccess())
-            {
-                var json = message.Body.ToJson();
-                var messageBytes = json.ToUtf8Bytes();
+            var json = message.Body.ToJson();
+            var messageBytes = json.ToUtf8Bytes();
 
-                PublishMessage(QueueNames.ExchangeTopic,
-                    routingKey: queueName,
-                    basicProperties: null, body: messageBytes);
-            }
+            PublishMessage(QueueNames.ExchangeTopic,
+                routingKey: queueName,
+                basicProperties: null, body: messageBytes);
         }
 
-        public IMessage<T> Get<T>(string queueName, TimeSpan? timeOut = null)
+        public virtual IMessage<T> Get<T>(string queueName, TimeSpan? timeOut = null)
         {
-            using (__requestAccess())
-            {
-                var now = DateTime.UtcNow;
+            var now = DateTime.UtcNow;
 
-                while (timeOut == null || (DateTime.Now - now) < timeOut.Value)
-                {
-                    var basicMsg = GetMessage(queueName, noAck: false);
-                    if (basicMsg != null)
-                    {
-                        return basicMsg.ToMessage<T>();
-                    }
-                    Thread.Sleep(100);
-                }
-
-                return null;
-            }
-        }
-
-        public IMessage<T> GetAsync<T>(string queueName)
-        {
-            using (__requestAccess())
+            while (timeOut == null || (DateTime.UtcNow - now) < timeOut.Value)
             {
                 var basicMsg = GetMessage(queueName, noAck: false);
-                return basicMsg.ToMessage<T>();
+                if (basicMsg != null)
+                {
+                    return basicMsg.ToMessage<T>();
+                }
+                Thread.Sleep(100);
             }
+
+            return null;
         }
 
-        public void Ack(IMessage message)
+        public virtual IMessage<T> GetAsync<T>(string queueName)
+        {
+            var basicMsg = GetMessage(queueName, noAck: false);
+            return basicMsg.ToMessage<T>();
+        }
+
+        public virtual void Ack(IMessage message)
         {
             var deliveryTag = ulong.Parse(message.Tag);
             Channel.BasicAck(deliveryTag, multiple:false);
         }
 
-        public void Nak(IMessage message, bool requeue, Exception exception = null)
+        public virtual void Nak(IMessage message, bool requeue, Exception exception = null)
         {
             try
             {
@@ -80,21 +71,18 @@ namespace ServiceStack.RabbitMq
             }
         }
 
-        public IMessage<T> CreateMessage<T>(object mqResponse)
+        public virtual IMessage<T> CreateMessage<T>(object mqResponse)
         {
-            using (__requestAccess())
+            var msgResult = mqResponse as BasicGetResult;
+            if (msgResult != null)
             {
-                var msgResult = mqResponse as BasicGetResult;
-                if (msgResult != null)
-                {
-                    return msgResult.ToMessage<T>();
-                }
-
-                return (IMessage<T>)mqResponse;
+                return msgResult.ToMessage<T>();
             }
+
+            return (IMessage<T>)mqResponse;
         }
 
-        public string GetTempQueueName()
+        public virtual string GetTempQueueName()
         {
             var anonMq = Channel.QueueDeclare(
                 queue: QueueNames.GetTempQueueName(),

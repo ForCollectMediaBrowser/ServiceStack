@@ -16,6 +16,8 @@
 // The latest version of this file can be found at http://www.codeplex.com/FluentValidation
 #endregion
 
+using ServiceStack.Web;
+
 namespace ServiceStack.FluentValidation
 {
     using System;
@@ -30,7 +32,10 @@ namespace ServiceStack.FluentValidation
     /// Base class for entity validator classes.
     /// </summary>
     /// <typeparam name="T">The type of the object being validated</typeparam>
-    public abstract class AbstractValidator<T> : IValidator<T>, IEnumerable<IValidationRule> {
+    public abstract class AbstractValidator<T> : IValidator<T>, IEnumerable<IValidationRule>, IRequiresRequest 
+    {
+        public virtual IRequest Request { get; set; }
+
         readonly TrackingCollection<IValidationRule> nestedValidators = new TrackingCollection<IValidationRule>();
 
         private static Func<CascadeMode> s_cascadeMode = () => ValidatorOptions.CascadeMode;
@@ -56,8 +61,12 @@ namespace ServiceStack.FluentValidation
         ValidationResult IValidator.Validate(ValidationContext context) {
             context.Guard("Cannot pass null to Validate");
 
+            if (Request == null)
+                Request = context.Request;
+
             var newContext = new ValidationContext<T>((T)context.InstanceToValidate, context.PropertyChain, context.Selector) {
-                IsChildContext = context.IsChildContext
+                IsChildContext = context.IsChildContext,
+                Request = context.Request
             };
 
             return Validate(newContext);
@@ -69,7 +78,9 @@ namespace ServiceStack.FluentValidation
         /// <param name="instance">The object to validate</param>
         /// <returns>A ValidationResult object containing any validation failures</returns>
         public virtual ValidationResult Validate(T instance) {
-            return Validate(new ValidationContext<T>(instance, new PropertyChain(), new DefaultValidatorSelector()));
+            return Validate(new ValidationContext<T>(instance, new PropertyChain(), new DefaultValidatorSelector()) {
+                Request = Request
+            });
         }
         
         /// <summary>
@@ -79,6 +90,10 @@ namespace ServiceStack.FluentValidation
         /// <returns>A ValidationResult object containing any validation failures.</returns>
         public virtual ValidationResult Validate(ValidationContext<T> context) {
             context.Guard("Cannot pass null to Validate");
+
+            if (Request == null)
+                Request = context.Request;
+
             var failures = nestedValidators.SelectMany(x => x.Validate(context)).ToList();
             return new ValidationResult(failures);
         }
@@ -114,6 +129,15 @@ namespace ServiceStack.FluentValidation
         public IRuleBuilderInitial<T, TProperty> RuleFor<TProperty>(Expression<Func<T, TProperty>> expression) {
             expression.Guard("Cannot pass null to RuleFor");
             var rule = PropertyRule.Create(expression, () => CascadeMode);
+            AddRule(rule);
+            var ruleBuilder = new RuleBuilder<T, TProperty>(rule);
+            return ruleBuilder;
+        }
+
+        public IRuleBuilderInitial<T, TProperty> RuleForEach<TProperty>(Expression<Func<T, IEnumerable<TProperty>>> expression)
+        {
+            expression.Guard("Cannot pass null to RuleForEach");
+            var rule = CollectionPropertyRule<TProperty>.Create(expression, () => CascadeMode);
             AddRule(rule);
             var ruleBuilder = new RuleBuilder<T, TProperty>(rule);
             return ruleBuilder;

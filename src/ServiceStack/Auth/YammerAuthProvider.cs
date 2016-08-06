@@ -101,9 +101,8 @@ namespace ServiceStack.Auth
                     this.ClientId,
                     this.RedirectUrl.UrlEncode());
 
-                authService.SaveSession(session, this.SessionExpiry);
-
-                return authService.Redirect(preAuthUrl);
+                this.SaveSession(authService, session, SessionExpiry);
+                return authService.Redirect(PreAuthUrlFilter(this, preAuthUrl));
             }
 
             // If access code exists, get access token to be able to call APIs.
@@ -117,7 +116,7 @@ namespace ServiceStack.Auth
             try
             {
                 // Get access response object
-                var contents = accessTokenUrl.GetStringFromUrl();
+                var contents = AccessTokenUrlFilter(this, accessTokenUrl).GetStringFromUrl();
 
                 var authInfo = HttpUtility.ParseQueryString(contents);
                 var authObj = JsonObject.Parse(contents);
@@ -160,19 +159,19 @@ namespace ServiceStack.Auth
                     return response;
 
                 // Has access!
-                return authService.Redirect(this.CallbackUrl.AddHashParam("s", "1"));
+                return authService.Redirect(SuccessRedirectUrlFilter(this, this.CallbackUrl.SetParam("s", "1")));
             }
             catch (WebException webEx)
             {
                 var statusCode = ((HttpWebResponse)webEx.Response).StatusCode;
                 if (statusCode == HttpStatusCode.BadRequest)
                 {
-                    return authService.Redirect(this.CallbackUrl.AddHashParam("f", "AccessTokenFailed"));
+                    return authService.Redirect(FailedRedirectUrlFilter(this, this.CallbackUrl.SetParam("f", "AccessTokenFailed")));
                 }
             }
 
             // Unknown error, shouldn't get here.
-            return authService.Redirect(this.CallbackUrl.AddHashParam("f", "Unknown"));
+            return authService.Redirect(FailedRedirectUrlFilter(this, this.CallbackUrl.SetParam("f", "Unknown")));
         }
 
         /// <summary>

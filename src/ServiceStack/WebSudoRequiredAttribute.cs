@@ -26,10 +26,15 @@ namespace ServiceStack
                 return;
 
             var session = req.GetSession();
-            if (session != null && session.HasRole("Admin") 
-                || (this.HasWebSudo(req, session as IWebSudoAuthSession) 
-                || this.DoHtmlRedirectIfConfigured(req, res)))
-                return;
+
+            var authRepo = HostContext.AppHost.GetAuthRepository(req);
+            using (authRepo as IDisposable)
+            {
+                if (session != null && session.HasRole("Admin", authRepo)
+                    || (this.HasWebSudo(req, session as IWebSudoAuthSession)
+                    || this.DoHtmlRedirectIfConfigured(req, res)))
+                    return;
+            }
 
             res.StatusCode = 402;
             res.StatusDescription = "Web Sudo Required";
@@ -39,19 +44,14 @@ namespace ServiceStack
         public bool HasWebSudo(IRequest req, IWebSudoAuthSession session)
         {
             if (session == null)
-            {
                 return false;
-            }
+
             if (!session.AuthenticatedWebSudoUntil.HasValue)
-            {
                 return false;
-            }
 
             var now = DateTime.UtcNow;
             if (now < session.AuthenticatedWebSudoUntil.Value.ToUniversalTime())
-            {
                 return true;
-            }
 
             session.AuthenticatedWebSudoUntil = null;
             req.SaveSession(session);

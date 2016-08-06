@@ -1,10 +1,14 @@
 ﻿using System;
+using System.Linq;
 using Funq;
+using NUnit.Framework;
+using ServiceStack.Admin;
 using ServiceStack.Auth;
 using ServiceStack.Authentication.OpenId;
 using ServiceStack.Caching;
 using ServiceStack.Configuration;
 using ServiceStack.Data;
+using ServiceStack.Host;
 using ServiceStack.Messaging;
 using ServiceStack.Messaging.Redis;
 using ServiceStack.MiniProfiler;
@@ -13,9 +17,12 @@ using ServiceStack.OrmLite;
 using ServiceStack.ProtoBuf;
 using ServiceStack.Redis;
 using ServiceStack.Api.Swagger;
+using ServiceStack.Common.Tests;
+using ServiceStack.DataAnnotations;
 using ServiceStack.Shared.Tests;
 using ServiceStack.Text;
 using ServiceStack.Validation;
+using ServiceStack.Web;
 using ServiceStack.WebHost.IntegrationTests.Services;
 using ServiceStack.WebHost.IntegrationTests.Tests;
 
@@ -23,13 +30,17 @@ namespace ServiceStack.WebHost.IntegrationTests
 {
     public class Global : System.Web.HttpApplication
     {
-        private const bool StartMqHost = false; 
+        private const bool StartMqHost = false;
 
         public class AppHost
             : AppHostBase
         {
             public AppHost()
-                : base("ServiceStack WebHost IntegrationTests", typeof(Reverse).Assembly) {}
+                : base("ServiceStack WebHost IntegrationTests", typeof(Reverse).Assembly)
+            {
+                typeof(Authenticate)
+                    .AddAttributes(new ExcludeAttribute(Feature.Metadata));
+            }
 
             public override void Configure(Container container)
             {
@@ -37,11 +48,13 @@ namespace ServiceStack.WebHost.IntegrationTests
 
                 JsConfig.EmitCamelCaseNames = true;
 
-				this.PreRequestFilters.Add((req, res) => {
-					req.Items["_DataSetAtPreRequestFilters"] = true;
-				});
+                this.PreRequestFilters.Add((req, res) =>
+                {
+                    req.Items["_DataSetAtPreRequestFilters"] = true;
+                });
 
-                this.GlobalRequestFilters.Add((req, res, dto) => {
+                this.GlobalRequestFilters.Add((req, res, dto) =>
+                {
                     req.Items["_DataSetAtRequestFilters"] = true;
 
                     var requestFilter = dto as RequestFilter;
@@ -65,9 +78,10 @@ namespace ServiceStack.WebHost.IntegrationTests
                 this.Container.Register<IDbConnectionFactory>(c =>
                     new OrmLiteConnectionFactory(
                         "~/App_Data/db.sqlite".MapHostAbsolutePath(),
-                        SqliteDialect.Provider) {
-                            ConnectionFilter = x => new ProfiledDbConnection(x, Profiler.Current)
-                        });
+                        SqliteDialect.Provider)
+                    {
+                        ConnectionFilter = x => new ProfiledDbConnection(x, Profiler.Current)
+                    });
 
                 this.Container.Register<ICacheClient>(new MemoryCacheClient());
                 //this.Container.Register<ICacheClient>(new BasicRedisClientManager());
@@ -94,20 +108,44 @@ namespace ServiceStack.WebHost.IntegrationTests
                 var resetMovies = this.Container.Resolve<ResetMoviesService>();
                 resetMovies.Post(null);
 
+                container.Register<IRedisClientsManager>(c => new RedisManagerPool());
+
                 Plugins.Add(new ValidationFeature());
                 Plugins.Add(new SessionFeature());
                 Plugins.Add(new ProtoBufFormat());
-                Plugins.Add(new RequestLogsFeature());
-                Plugins.Add(new SwaggerFeature { UseBootstrapTheme = true });
+                Plugins.Add(new RequestLogsFeature
+                {
+                    //RequestLogger = new RedisRequestLogger(container.Resolve<IRedisClientsManager>())
+                    RequestLogger = new CsvRequestLogger(),
+                });
+                Plugins.Add(new SwaggerFeature
+                {
+                    //UseBootstrapTheme = true
+                    OperationFilter = x => x.Consumes = x.Produces = new[] { MimeTypes.Json, MimeTypes.Xml }.ToList(),
+                    RouteSummary =
+                    {
+                        { "/swaggerexamples", "Swagger Examples Summary" }
+                    }
+                });
                 Plugins.Add(new PostmanFeature());
                 Plugins.Add(new CorsFeature());
+                Plugins.Add(new AutoQueryFeature { MaxLimit = 100 });
+                Plugins.Add(new AdminFeature());
 
                 container.RegisterValidators(typeof(CustomersValidator).Assembly);
 
+                typeof(ResponseStatus)
+                    .AddAttributes(new ServiceStack.DataAnnotations.DescriptionAttribute("This is the Response Status!"));
+
+                typeof(ResponseStatus)
+                   .GetProperty("Message")
+                   .AddAttributes(new ServiceStack.DataAnnotations.DescriptionAttribute("A human friendly error message"));
 
                 //var onlyEnableFeatures = Feature.All.Remove(Feature.Jsv | Feature.Soap);
-                SetConfig(new HostConfig {
+                SetConfig(new HostConfig
+                {
                     AdminAuthSecret = AuthTestsBase.AuthSecret,
+                    ApiVersion = "0.2.0",
                     //EnableFeatures = onlyEnableFeatures,
                     DebugMode = true, //Show StackTraces for easier debugging
                 });
@@ -116,7 +154,7 @@ namespace ServiceStack.WebHost.IntegrationTests
                 {
                     var redisManager = new BasicRedisClientManager();
                     var mqHost = new RedisMqServer(redisManager);
-                    mqHost.RegisterHandler<Reverse>(ServiceController.ExecuteMessage);
+                    mqHost.RegisterHandler<Reverse>(ExecuteMessage);
                     mqHost.Start();
                     this.Container.Register((IMessageService)mqHost);
                 }
@@ -132,14 +170,14 @@ namespace ServiceStack.WebHost.IntegrationTests
 
                 Plugins.Add(new AuthFeature(() => new CustomUserSession(),
                     new IAuthProvider[] {
-						new CredentialsAuthProvider(appSettings), 
-						new FacebookAuthProvider(appSettings), 
-						new TwitterAuthProvider(appSettings), 
-                        new GoogleOpenIdOAuthProvider(appSettings), 
-                        new OpenIdOAuthProvider(appSettings), 
+                        new CredentialsAuthProvider(appSettings),
+                        new FacebookAuthProvider(appSettings),
+                        new TwitterAuthProvider(appSettings),
+                        new GoogleOpenIdOAuthProvider(appSettings),
+                        new OpenIdOAuthProvider(appSettings),
                         new DigestAuthProvider(appSettings),
-						new BasicAuthProvider(appSettings), 
-					}));
+                        new BasicAuthProvider(appSettings),
+                    }));
 
                 Plugins.Add(new RegistrationFeature());
 
@@ -151,6 +189,13 @@ namespace ServiceStack.WebHost.IntegrationTests
                     authRepo.DropAndReCreateTables();
                 else
                     authRepo.InitSchema();
+            }
+
+            public override object OnPreExecuteServiceFilter(IService service, object request, IRequest httpReq, IResponse httpRes)
+            {
+                if (service is IocScopeService)
+                    service.InjectRequestIntoDependencies(httpReq);
+                return request;
             }
         }
 
@@ -174,6 +219,5 @@ namespace ServiceStack.WebHost.IntegrationTests
             if (mqHost != null)
                 mqHost.Start();
         }
-
     }
 }

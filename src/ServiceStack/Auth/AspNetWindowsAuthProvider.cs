@@ -126,7 +126,7 @@ namespace ServiceStack.Auth
                         session.Roles.AddIfNotExists(role);
                 }
 
-                authService.SaveSession(session, SessionExpiry);
+                this.SaveSession(authService, session, SessionExpiry);
                 
                 if (response != null)
                     return response;
@@ -154,22 +154,21 @@ namespace ServiceStack.Auth
 
         public void PreAuthenticate(IRequest req, IResponse res)
         {
-            SessionFeature.AddSessionIdToRequestFilter(req, res, null); //Required to get req.GetSessionId()
-
-            var authService = req.TryResolve<AuthenticateService>();
-            authService.Request = req;
             var user = req.GetUser();
-
             if (user != null)
             {
-                var session = req.GetSession();
-                if (LoginMatchesSession(session, user.Identity.Name)) return;
-
-                var response = authService.Post(new Authenticate
+                SessionFeature.AddSessionIdToRequestFilter(req, res, null); //Required to get req.GetSessionId()
+                using (var authService = HostContext.ResolveService<AuthenticateService>(req))
                 {
-                    provider = Name,
-                    UserName = user.GetUserName(),
-                });
+                    var session = req.GetSession();
+                    if (LoginMatchesSession(session, user.Identity.Name)) return;
+
+                    var response = authService.Post(new Authenticate
+                    {
+                        provider = Name,
+                        UserName = user.GetUserName(),
+                    });
+                }
             }
         }
     }
@@ -202,7 +201,8 @@ namespace ServiceStack.Auth
                 var aspReqBase = aspReq.OriginalRequest as HttpRequestBase;
                 if (aspReqBase != null)
                 {
-                    return aspReqBase.RequestContext.HttpContext.GetUser();
+                    var user = aspReqBase.RequestContext.HttpContext.GetUser();
+                    return user.GetUserName() == null ? null : user;
                 }
             }
             return null;
@@ -210,7 +210,10 @@ namespace ServiceStack.Auth
 
         public static string GetUserName(this IPrincipal user)
         {
-            return user != null ? user.Identity.Name : null;
+            var userName = user != null ? user.Identity.Name : null;
+            return string.IsNullOrEmpty(userName) //can be ""
+                ? null
+                : userName;
         }
     }
 }

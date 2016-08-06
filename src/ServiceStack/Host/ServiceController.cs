@@ -59,13 +59,6 @@ namespace ServiceStack.Host
 
         public string DefaultOperationsNamespace { get; set; }
 
-        private IResolver resolver;
-        public IResolver Resolver
-        {
-            get { return resolver ?? Service.GlobalResolver; }
-            set { resolver = value; }
-        }
-
         public Func<IEnumerable<Type>> ResolveServicesFn { get; set; }
 
         private ContainerResolveCache typeFactory;
@@ -110,14 +103,20 @@ namespace ServiceStack.Host
                 throw new Exception(msg, ex);
             }
         }
+        public void RegisterServicesInAssembly(Assembly assembly)
+        {
+            foreach (var serviceType in assembly.GetTypes().Where(IsServiceType))
+            {
+                RegisterService(serviceType);
+            }
+        }
 
         public void RegisterService(Type serviceType)
         {
             try
             {
-                var isNService = typeof(IService).IsAssignableFrom(serviceType);
-                if (!isNService)
-                    throw new ArgumentException("Type {0} is not a Web Service that inherits IService".Fmt(serviceType.FullName));
+                if (!IsServiceType(serviceType))
+                    throw new ArgumentException("Type {0} is not a Web Service that implements IService".Fmt(serviceType.FullName));
                 
                 RegisterService(typeFactory, serviceType);
                 appHost.Container.RegisterAutoWiredType(serviceType);
@@ -141,8 +140,7 @@ namespace ServiceStack.Host
         {
             var processedReqs = new HashSet<Type>();
 
-            if (typeof(IService).IsAssignableFrom(serviceType)
-                && !serviceType.IsAbstract && !serviceType.IsGenericTypeDefinition && !serviceType.ContainsGenericParameters)
+            if (IsServiceType(serviceType))
             {
                 foreach (var mi in serviceType.GetActions())
                 {
@@ -168,7 +166,7 @@ namespace ServiceStack.Host
                         this.RequestTypeFactoryMap[requestType] = req =>
                         {
                             var restPath = req.GetRoute();
-                            var request = RestHandler.CreateRequest(req, restPath, req.GetRequestParams(), false);
+                            var request = RestHandler.CreateRequest(req, restPath, req.GetRequestParams(), requestType.CreateInstance());
 
                             var rawReq = (IRequiresRequestStream)request;
                             rawReq.RequestStream = req.InputStream;
@@ -176,10 +174,19 @@ namespace ServiceStack.Host
                         };
                     }
 
-                    Log.DebugFormat("Registering {0} service '{1}' with request '{2}'",
-                        (responseType != null ? "Reply" : "OneWay"), serviceType.GetOperationName(), requestType.GetOperationName());
+                    if (Log.IsDebugEnabled)
+                        Log.DebugFormat("Registering {0} service '{1}' with request '{2}'",
+                            responseType != null ? "Reply" : "OneWay", serviceType.GetOperationName(), requestType.GetOperationName());
                 }
             }
+        }
+
+        public static bool IsServiceType(Type serviceType)
+        {
+            return typeof(IService).IsAssignableFrom(serviceType)
+                && !serviceType.IsAbstract 
+                && !serviceType.IsGenericTypeDefinition 
+                && !serviceType.ContainsGenericParameters;
         }
 
         public readonly Dictionary<string, List<RestPath>> RestPathMap = new Dictionary<string, List<RestPath>>();
@@ -359,14 +366,14 @@ namespace ServiceStack.Host
             var serviceExecDef = typeof(ServiceRequestExec<,>).MakeGenericType(serviceType, requestType);
             var iserviceExec = (IServiceExec)serviceExecDef.CreateInstance();
 
-            ServiceExecFn handlerFn = (requestContext, dto) =>
+            ServiceExecFn handlerFn = (req, dto) =>
             {
                 var service = serviceFactoryFn.CreateInstance(serviceType);
 
-                ServiceExecFn serviceExec = (reqCtx, req) =>
-                    iserviceExec.Execute(reqCtx, service, req);
+                ServiceExecFn serviceExec = (reqCtx, requestDto) =>
+                    iserviceExec.Execute(reqCtx, service, requestDto);
 
-                return ManagedServiceExec(serviceExec, (IService)service, requestContext, dto);
+                return ManagedServiceExec(serviceExec, (IService)service, req, dto);
             };
 
             AddToRequestExecMap(requestType, serviceType, handlerFn);
@@ -409,7 +416,10 @@ namespace ServiceStack.Host
                 object response = null;
                 try
                 {
-                    requestDto = request.Dto = appHost.OnPreExecuteServiceFilter(service, requestDto, request, request.Response);
+                    requestDto = appHost.OnPreExecuteServiceFilter(service, requestDto, request, request.Response);
+
+                    if (request.Dto == null) // Don't override existing batched DTO[]
+                        request.Dto = requestDto; 
 
                     //Executes the service and returns the result
                     response = serviceExec(request, requestDto);
@@ -439,15 +449,37 @@ namespace ServiceStack.Host
             }
         }
 
-        internal static void InjectRequestContext(object service, IRequest requestContext)
+        internal static void InjectRequestContext(object service, IRequest req)
         {
-            if (requestContext == null) return;
+            if (req == null) return;
 
             var serviceRequiresContext = service as IRequiresRequest;
             if (serviceRequiresContext != null)
             {
-                serviceRequiresContext.Request = requestContext;
+                serviceRequiresContext.Request = req;
             }
+        }
+
+        public object ApplyResponseFilters(object response, IRequest req)
+        {
+            var taskResponse = response as Task;
+            if (taskResponse != null)
+            {
+                taskResponse.Wait();
+                response = taskResponse.GetResult();
+            }
+
+            return ApplyResponseFiltersInternal(response, req);
+        }
+
+        private object ApplyResponseFiltersInternal(object response, IRequest req)
+        {
+            response = appHost.ApplyResponseConverters(req, response);
+
+            if (appHost.ApplyResponseFilters(req, req.Response, response))
+                return req.Response.Dto;
+
+            return response;
         }
 
         /// <summary>
@@ -463,22 +495,14 @@ namespace ServiceStack.Host
         /// </summary>
         public object ExecuteMessage(IMessage dto, IRequest req)
         {
-            req.Dto = dto.Body;
-            if (HostContext.ApplyMessageRequestFilters(req, req.Response, dto.Body))
+            req.Dto = appHost.ApplyRequestConverters(req, dto.Body);
+            if (appHost.ApplyMessageRequestFilters(req, req.Response, dto.Body))
                 return req.Response.Dto;
 
             var response = Execute(dto.Body, req);
+            response = ApplyResponseFilters(response, req);
 
-            var taskResponse = response as Task;
-            if (taskResponse != null)
-            {
-                //Ensure messages are executed synchronously
-                taskResponse.Wait();
-                response = taskResponse.GetResult();
-            }
-
-            if (HostContext.ApplyMessageResponseFilters(req, req.Response, response))
-                return req.Response.Dto;
+            req.Response.EndMqRequest();
 
             return response;
         }
@@ -491,42 +515,65 @@ namespace ServiceStack.Host
             return Execute(requestDto, new BasicRequest());
         }
 
-        /// <summary>
-        /// Execute HTTP
-        /// </summary>
         public object Execute(object requestDto, IRequest req)
         {
             req.Dto = requestDto;
             var requestType = requestDto.GetType();
+            req.OperationName = requestType.Name;
 
             if (appHost.Config.EnableAccessRestrictions)
                 AssertServiceRestrictions(requestType, req.RequestAttributes);
 
             var handlerFn = GetService(requestType);
-            return handlerFn(req, requestDto);
+            var response = appHost.OnAfterExecute(req, requestDto, handlerFn(req, requestDto));
+
+            return response;
         }
 
+        public object Execute(object requestDto, IRequest req, bool applyFilters)
+        {
+            if (applyFilters)
+            {
+                if (appHost.ApplyRequestFilters(req, req.Response, requestDto))
+                    return null;
+            }
+
+            var response = Execute(requestDto, req);
+
+            return applyFilters
+                ? ApplyResponseFilters(response, req)
+                : response;
+        }
+
+        [Obsolete("Use Execute(IRequest, applyFilters:true)")]
         public object Execute(IRequest req)
+        {
+            return Execute(req, applyFilters:true);
+        }
+
+        public object Execute(IRequest req, bool applyFilters)
         {
             string contentType;
             var restPath = RestHandler.FindMatchingRestPath(req.Verb, req.PathInfo, out contentType);
             req.SetRoute(restPath as RestPath);
             req.OperationName = restPath.RequestType.GetOperationName();
-            var request = RestHandler.CreateRequest(req, restPath);
-            req.Dto = request;
+            var requestDto = RestHandler.CreateRequest(req, restPath);
+            req.Dto = requestDto;
 
-            if (appHost.ApplyRequestFilters(req, req.Response, request))
-                return null;
+            if (applyFilters)
+            {
+                if (appHost.ApplyRequestFilters(req, req.Response, requestDto))
+                    return null;
+            }
 
-            var response = Execute(request, req);
+            var response = Execute(requestDto, req);
 
-            if (appHost.ApplyResponseFilters(req, req.Response, response))
-                return null;
-
-            return response;
+            return applyFilters 
+                ? ApplyResponseFilters(response, req) 
+                : response;
         }
 
-        public Task<object> ExecuteAsync(object requestDto, IRequest req)
+        public Task<object> ExecuteAsync(object requestDto, IRequest req, bool applyFilters)
         {
             req.Dto = requestDto;
             var requestType = requestDto.GetType();
@@ -540,13 +587,36 @@ namespace ServiceStack.Host
             var handlerFn = GetService(requestType);
             var response = handlerFn(req, requestDto);
 
-            var taskResponse = response as Task;
-            if (taskResponse != null)
+            var taskObj = response as Task<object>;
+            if (taskObj != null)
             {
-                return taskResponse.ContinueWith(x => x.GetResult());
+                return taskObj.ContinueWith(t =>
+                {
+                    var taskArray = t.Result as Task[];
+                    if (taskArray != null)
+                    {
+                        return Task.Factory.ContinueWhenAll(taskArray, tasks =>
+                        {
+                            object[] ret = null;
+                            for (int i = 0; i < tasks.Length; i++)
+                            {
+                                var tResult = tasks[i].GetResult();
+                                if (ret == null)
+                                    ret = (object[])Array.CreateInstance(tResult.GetType(), tasks.Length);
+
+                                ret[i] = ApplyResponseFiltersInternal(tResult, req);
+                            }
+                            return (object)ret;
+                        });
+                    }
+
+                    return ApplyResponseFiltersInternal(t.Result, req).AsTaskResult();
+                }).Unwrap();
             }
 
-            return response.AsTaskResult();
+            return applyFilters
+                ? ApplyResponseFiltersInternal(response, req).AsTaskResult()
+                : response.AsTaskResult();
         }
 
         public ServiceExecFn GetService(Type requestType)
@@ -559,9 +629,7 @@ namespace ServiceStack.Host
                     var elType = requestType.GetElementType();
                     if (requestExecMap.TryGetValue(elType, out handlerFn))
                     {
-                        return (req, dtos) => 
-                            from object dto in (IEnumerable)dtos 
-                            select handlerFn(req, dto);
+                        return CreateAutoBatchServiceExec(handlerFn);
                     }
                 }
 
@@ -571,9 +639,87 @@ namespace ServiceStack.Host
             return handlerFn;
         }
 
+        private static ServiceExecFn CreateAutoBatchServiceExec(ServiceExecFn handlerFn)
+        {
+            return (req, dtos) => 
+            {
+                var dtosList = ((IEnumerable) dtos).Map(x => x);
+                if (dtosList.Count == 0)
+                    return TypeConstants.EmptyObjectArray;
+
+                var firstDto = dtosList[0];
+
+                var firstResponse = handlerFn(req, firstDto);
+                if (firstResponse is Exception)
+                {
+                    req.SetAutoBatchCompletedHeader(0);
+                    return firstResponse;
+                }
+
+                var asyncResponse = firstResponse as Task;
+
+                //sync
+                if (asyncResponse == null) 
+                {
+                    var ret = firstResponse != null
+                        ? (object[])Array.CreateInstance(firstResponse.GetType(), dtosList.Count)
+                        : new object[dtosList.Count];
+
+                    ret[0] = firstResponse; //don't re-execute first request
+                    for (var i = 1; i < dtosList.Count; i++)
+                    {
+                        var dto = dtosList[i];
+                        var response = handlerFn(req, dto);
+                        //short-circuit on first error
+                        if (response is Exception)
+                        {
+                            req.SetAutoBatchCompletedHeader(i);
+                            return response;
+                        }
+
+                        ret[i] = response;
+                    }
+                    req.SetAutoBatchCompletedHeader(dtosList.Count);
+                    return ret;
+                }
+
+                //async
+                var asyncResponses = new Task[dtosList.Count];
+                Task firstAsyncError = null;
+
+                //execute each async service sequentially
+                return dtosList.EachAsync((dto, i) =>
+                {
+                    //short-circuit on first error and don't exec any more handlers
+                    if (firstAsyncError != null)
+                        return firstAsyncError;
+
+                    asyncResponses[i] = i == 0
+                        ? asyncResponse //don't re-execute first request
+                        : (Task) handlerFn(req, dto);
+
+                    var asyncResult = asyncResponses[i].GetResult();
+                    if (asyncResult is Exception)
+                    {
+                        req.SetAutoBatchCompletedHeader(i);
+                        return firstAsyncError = asyncResponses[i];
+                    }
+                    return asyncResponses[i];
+                })
+                .ContinueWith(x => {
+                    if (firstAsyncError != null)
+                        return (object)firstAsyncError;
+
+                    req.SetAutoBatchCompletedHeader(dtosList.Count);
+                    return (object) asyncResponses;
+                }); //return error or completed responses
+            };
+        }
+
         public void AssertServiceRestrictions(Type requestType, RequestAttributes actualAttributes)
         {
             if (!appHost.Config.EnableAccessRestrictions) return;
+            if ((RequestAttributes.InProcess & actualAttributes) == RequestAttributes.InProcess) return;
 
             RestrictAttribute restrictAttr;
             var hasNoAccessRestrictions = !requestServiceAttrs.TryGetValue(requestType, out restrictAttr)
@@ -584,7 +730,7 @@ namespace ServiceStack.Host
                 return;
             }
 
-            var failedScenarios = new StringBuilder();
+            var failedScenarios = StringBuilderCache.Allocate();
             foreach (var requiredScenario in restrictAttr.AccessibleToAny)
             {
                 var allServiceRestrictionsMet = (requiredScenario & actualAttributes) == actualAttributes;
@@ -605,7 +751,7 @@ namespace ServiceStack.Host
 
             throw new UnauthorizedAccessException(
                 string.Format("Could not execute service '{0}', The following restrictions were not met: '{1}'" + internalDebugMsg,
-                    requestType.GetOperationName(), failedScenarios));
+                    requestType.GetOperationName(), StringBuilderCache.ReturnAndFree(failedScenarios)));
         }
     }
 

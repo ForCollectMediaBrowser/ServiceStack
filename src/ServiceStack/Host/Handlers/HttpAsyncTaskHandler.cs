@@ -9,6 +9,7 @@ using System.Web;
 using ServiceStack.Host.AspNet;
 using ServiceStack.Host.HttpListener;
 using ServiceStack.Logging;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack.Host.Handlers
@@ -16,13 +17,6 @@ namespace ServiceStack.Host.Handlers
     public abstract class HttpAsyncTaskHandler : IHttpAsyncHandler, IServiceStackHandler
     {
         internal static readonly ILog Log = LogManager.GetLogger(typeof(HttpAsyncTaskHandler));
-
-        internal static readonly Task<object> EmptyTask;
-
-        static HttpAsyncTaskHandler()
-        {
-            EmptyTask = ((object)null).AsTaskResult();
-        }
 
         public string RequestName { get; set; }
 
@@ -47,9 +41,9 @@ namespace ServiceStack.Host.Handlers
 
             RememberLastRequestInfo(operationName, context.Request.PathInfo);
 
-            if (String.IsNullOrEmpty(operationName)) return EmptyTask;
+            if (String.IsNullOrEmpty(operationName)) return TypeConstants.EmptyTask;
 
-            if (DefaultHandledRequest(context)) return EmptyTask;
+            if (DefaultHandledRequest(context)) return TypeConstants.EmptyTask;
 
             var httpReq = new AspNetRequest(context, operationName);
 
@@ -66,7 +60,8 @@ namespace ServiceStack.Host.Handlers
             var ctx = HttpContext.Current;
 
             //preserve Current Culture:
-            return new Task(() => {
+            return new Task(() =>
+            {
                 Thread.CurrentThread.CurrentCulture = currentCulture;
                 Thread.CurrentThread.CurrentUICulture = currentUiCulture;
                 //HttpContext is not preserved in ThreadPool threads: http://stackoverflow.com/a/13558065/85785
@@ -98,7 +93,7 @@ namespace ServiceStack.Host.Handlers
         public virtual Task ProcessRequestAsync(IRequest httpReq, IResponse httpRes, string operationName)
         {
             var task = CreateProcessRequestTask(httpReq, httpRes, operationName);
-            task.Start();
+            task.Start(TaskScheduler.Default);
             return task;
         }
 
@@ -121,11 +116,11 @@ namespace ServiceStack.Host.Handlers
 
             RememberLastRequestInfo(operationName, context.Request.RawUrl);
 
-            if (String.IsNullOrEmpty(operationName)) return;
+            if (string.IsNullOrEmpty(operationName)) return;
 
             if (DefaultHandledRequest(context)) return;
 
-            var httpReq = ((HttpListenerBase)ServiceStackHost.Instance).CreateRequest(context, operationName);   
+            var httpReq = ((HttpListenerBase)ServiceStackHost.Instance).CreateRequest(context, operationName);
 
             ProcessRequest(httpReq, httpReq.Response, operationName);
         }
@@ -143,12 +138,10 @@ namespace ServiceStack.Host.Handlers
             var task = ProcessRequestAsync(context.Request.RequestContext.HttpContext);
 
             task.ContinueWith(ar =>
-                              cb(ar));
+                cb(ar));
 
             if (task.Status == TaskStatus.Created)
-            {
-                task.Start();
-            }
+                task.Start(TaskScheduler.Default);
 
             return task;
         }
@@ -168,12 +161,12 @@ namespace ServiceStack.Host.Handlers
         protected Task HandleException(IRequest httpReq, IResponse httpRes, string operationName, Exception ex)
         {
             var errorMessage = string.Format("Error occured while Processing Request: {0}", ex.Message);
-            Log.Error(errorMessage, ex);
+            HostContext.AppHost.OnLogError(typeof(HttpAsyncTaskHandler), errorMessage, ex);
 
             try
             {
-                HostContext.RaiseUncaughtException(httpReq, httpRes, operationName, ex);
-                return EmptyTask;
+                HostContext.RaiseAndHandleUncaughtException(httpReq, httpRes, operationName, ex);
+                return TypeConstants.EmptyTask;
             }
             catch (Exception writeErrorEx)
             {

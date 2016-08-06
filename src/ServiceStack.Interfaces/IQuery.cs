@@ -5,16 +5,24 @@ using System.Runtime.Serialization;
 namespace ServiceStack
 {
     //Interfaces and DTO's used in AutoQuery
-    public interface IQuery
+    public interface IQuery : IMeta
     {
         int? Skip { get; set; }
         int? Take { get; set; }
         string OrderBy { get; set; }
         string OrderByDesc { get; set; }
+        string Include { get; set; }
+        string Fields { get; set; }
     }
 
-    public interface IQuery<From> : IQuery { }
-    public interface IQuery<From,Into> : IQuery { }
+    public interface IQueryDb : IQuery { }
+    public interface IQueryData : IQuery { }
+
+    public interface IQueryDb<From> : IQueryDb { }
+    public interface IQueryDb<From, Into> : IQueryDb { }
+
+    public interface IQueryData<From> : IQueryData { }
+    public interface IQueryData<From, Into> : IQueryData { }
 
     public interface IJoin { }
     public interface IJoin<Source, Join1> : IJoin { }
@@ -41,11 +49,24 @@ namespace ServiceStack
     }
 
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
-    public class QueryAttribute : AttributeBase
+    public class QueryDbAttribute : AttributeBase
     {
-        public QueryAttribute() {}
+        public QueryDbAttribute() { }
 
-        public QueryAttribute(QueryTerm defaultTerm)
+        public QueryDbAttribute(QueryTerm defaultTerm)
+        {
+            DefaultTerm = defaultTerm;
+        }
+
+        public QueryTerm DefaultTerm { get; set; }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
+    public class QueryDataAttribute : AttributeBase
+    {
+        public QueryDataAttribute() { }
+
+        public QueryDataAttribute(QueryTerm defaultTerm)
         {
             DefaultTerm = defaultTerm;
         }
@@ -54,7 +75,7 @@ namespace ServiceStack
     }
 
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-    public class QueryFieldAttribute : AttributeBase
+    public class QueryDbFieldAttribute : AttributeBase
     {
         public QueryTerm Term { get; set; }
         public string Operand { get; set; }
@@ -63,6 +84,14 @@ namespace ServiceStack
         public string ValueFormat { get; set; }
         public ValueStyle ValueStyle { get; set; }
         public int ValueArity { get; set; }
+    }
+
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
+    public class QueryDataFieldAttribute : AttributeBase
+    {
+        public QueryTerm Term { get; set; }
+        public string Condition { get; set; }
+        public string Field { get; set; }
     }
 
     public abstract class QueryBase : IQuery
@@ -78,14 +107,52 @@ namespace ServiceStack
 
         [DataMember(Order = 4)]
         public virtual string OrderByDesc { get; set; }
+
+        [DataMember(Order = 5)]
+        public virtual string Include { get; set; }
+
+        [DataMember(Order = 6)]
+        public virtual string Fields { get; set; }
+
+        [DataMember(Order = 7)]
+        public virtual Dictionary<string, string> Meta { get; set; }
     }
 
-    public abstract class QueryBase<T> : QueryBase, IQuery<T>, IReturn<QueryResponse<T>> { }
 
-    public abstract class QueryBase<From, Into> : QueryBase, IQuery<From, Into>, IReturn<QueryResponse<Into>> { }
+    [Obsolete("Use [QueryDb]")]
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
+    public class QueryAttribute : AttributeBase { }
+
+    [Obsolete("Use [QueryDbField]")]
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
+    public class QueryFieldAttribute : AttributeBase { }
+
+    [Obsolete("Use QueryDb")]
+    public abstract class QueryBase<T> : QueryBase, IQueryDb<T>, IReturn<QueryResponse<T>> { }
+
+    [Obsolete("Use QueryDb")]
+    public abstract class QueryBase<From, Into> : QueryBase, IQueryDb<From, Into>, IReturn<QueryResponse<Into>> { }
+
+    [Obsolete("Use IQueryDb<From>")]
+    public interface IQuery<From> : IQueryDb { }
+    [Obsolete("Use IQueryDb<From,Into>")]
+    public interface IQuery<From, Into> : IQueryDb { }
+
+
+    public abstract class QueryDb<T> : QueryBase, IQueryDb<T>, IReturn<QueryResponse<T>> { }
+    public abstract class QueryDb<From, Into> : QueryBase, IQueryDb<From, Into>, IReturn<QueryResponse<Into>> { }
+
+    public abstract class QueryData<T> : QueryBase, IQueryData<T>, IReturn<QueryResponse<T>> { }
+    public abstract class QueryData<From, Into> : QueryBase, IQueryData<From, Into>, IReturn<QueryResponse<Into>> { }
+
+    public interface IQueryResponse : IHasResponseStatus, IMeta
+    {
+        int Offset { get; set; }
+        int Total { get; set; }
+    }
 
     [DataContract]
-    public class QueryResponse<T> : IHasResponseStatus, IMeta
+    public class QueryResponse<T> : IQueryResponse
     {
         [DataMember(Order = 1)]
         public virtual int Offset { get; set; }

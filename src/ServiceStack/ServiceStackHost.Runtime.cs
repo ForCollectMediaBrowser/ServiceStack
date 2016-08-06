@@ -5,14 +5,25 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Data;
+using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.Serialization;
 using System.Web;
+using System.Xml;
+using ServiceStack.Auth;
+using ServiceStack.Caching;
+using ServiceStack.Data;
+using ServiceStack.DataAnnotations;
 using ServiceStack.FluentValidation;
 using ServiceStack.Host;
 using ServiceStack.Host.Handlers;
+using ServiceStack.Messaging;
 using ServiceStack.Metadata;
 using ServiceStack.MiniProfiler;
+using ServiceStack.Redis;
+using ServiceStack.Serialization;
 using ServiceStack.Support.WebHost;
 using ServiceStack.Web;
 
@@ -20,6 +31,30 @@ namespace ServiceStack
 {
     public abstract partial class ServiceStackHost
     {
+        public virtual object ApplyRequestConverters(IRequest req, object requestDto)
+        {
+            foreach (var converter in RequestConverters)
+            {
+                requestDto = converter(req, requestDto) ?? requestDto;
+                if (req.Response.IsClosed)
+                    return requestDto;
+            }
+
+            return requestDto;
+        }
+
+        public virtual object ApplyResponseConverters(IRequest req, object responseDto)
+        {
+            foreach (var converter in ResponseConverters)
+            {
+                responseDto = converter(req, responseDto) ?? responseDto;
+                if (req.Response.IsClosed)
+                    return responseDto;
+            }
+
+            return responseDto;
+        }
+
         /// <summary>
         /// Apply PreRequest Filters for participating Custom Handlers, e.g. RazorFormat, MarkdownFormat, etc
         /// </summary>
@@ -29,19 +64,37 @@ namespace ServiceStack
         }
 
         /// <summary>
+        /// Apply PreAuthenticate Filters from IAuthWithRequest AuthProviders
+        /// </summary>
+        public virtual void ApplyPreAuthenticateFilters(IRequest httpReq, IResponse httpRes)
+        {
+            httpReq.Items[Keywords.HasPreAuthenticated] = true;
+            foreach (var authProvider in AuthenticateService.AuthWithRequestProviders)
+            {
+                authProvider.PreAuthenticate(httpReq, httpRes);
+            }
+        }
+
+        /// <summary>
         /// Applies the raw request filters. Returns whether or not the request has been handled 
         /// and no more processing should be done.
         /// </summary>
         /// <returns></returns>
         public virtual bool ApplyPreRequestFilters(IRequest httpReq, IResponse httpRes)
         {
-            foreach (var requestFilter in PreRequestFilters)
-            {
-                requestFilter(httpReq, httpRes);
-                if (httpRes.IsClosed) break;
-            }
+            if (PreRequestFilters.Count == 0)
+                return false;
 
-            return httpRes.IsClosed;
+            using (Profiler.Current.Step("Executing Pre RequestFilters"))
+            {
+                foreach (var requestFilter in PreRequestFilters)
+                {
+                    requestFilter(httpReq, httpRes);
+                    if (httpRes.IsClosed) break;
+                }
+
+                return httpRes.IsClosed;
+            }
         }
 
         /// <summary>
@@ -53,6 +106,9 @@ namespace ServiceStack
         {
             req.ThrowIfNull("req");
             res.ThrowIfNull("res");
+
+            if (res.IsClosed)
+                return true;
 
             using (Profiler.Current.Step("Executing Request Filters"))
             {
@@ -116,13 +172,15 @@ namespace ServiceStack
             req.ThrowIfNull("req");
             res.ThrowIfNull("res");
 
+            if (res.IsClosed)
+                return true;
             using (Profiler.Current.Step("Executing Response Filters"))
             {
-                if (!req.IsMultiRequest() || !(response is IEnumerable))
+                var batchResponse = req.IsMultiRequest() ? response as IEnumerable : null;
+                if (batchResponse == null)
                     return ApplyResponseFiltersSingle(req, res, response);
 
-                var dtos = (IEnumerable)response;
-                foreach (var dto in dtos)
+                foreach (var dto in batchResponse)
                 {
                     if (ApplyResponseFiltersSingle(req, res, dto))
                         return true;
@@ -152,8 +210,11 @@ namespace ServiceStack
                 }
             }
 
-            ExecTypedFilters(GlobalTypedResponseFilters, req, res, response);
-            if (res.IsClosed) return res.IsClosed;
+            if (response != null)
+            {
+                ExecTypedFilters(GlobalTypedResponseFilters, req, res, response);
+                if (res.IsClosed) return res.IsClosed;
+            }
 
             //Exec global filters
             foreach (var responseFilter in GlobalResponseFilters)
@@ -246,15 +307,18 @@ namespace ServiceStack
             }
         }
 
-        public virtual TimeSpan GetDefaultSessionExpiry()
+        public virtual TimeSpan GetDefaultSessionExpiry(IRequest req)
         {
-            var authFeature = this.GetPlugin<AuthFeature>();
-            if (authFeature != null)
-                return authFeature.GetDefaultSessionExpiry();
-
             var sessionFeature = this.GetPlugin<SessionFeature>();
-            return sessionFeature != null
-                ? sessionFeature.SessionExpiry
+            if (sessionFeature != null)
+            {
+                return req.IsPermanentSession()
+                    ? sessionFeature.PermanentSessionExpiry ?? SessionFeature.DefaultPermanentSessionExpiry
+                    : sessionFeature.SessionExpiry ?? SessionFeature.DefaultSessionExpiry;
+            }
+
+            return req.IsPermanentSession()
+                ? SessionFeature.DefaultPermanentSessionExpiry
                 : SessionFeature.DefaultSessionExpiry;
         }
 
@@ -361,11 +425,18 @@ namespace ServiceStack
         {
             if (Config.AdminAuthSecret != null)
             {
-                var authSecret = httpReq.GetParam("authsecret");
+                var authSecret = httpReq.GetParam(Keywords.AuthSecret);
                 return authSecret == Config.AdminAuthSecret;
             }
 
             return false;
+        }
+
+        public virtual Exception ResolveResponseException(Exception ex)
+        {
+            return Config.ReturnsInnerException && ex.InnerException != null && !(ex is IHttpError)
+                ? ex.InnerException
+                : ex;
         }
 
         public virtual void OnExceptionTypeFilter(Exception ex, ResponseStatus responseStatus)
@@ -374,10 +445,13 @@ namespace ServiceStack
             var isValidationSummaryEx = argEx is ValidationException;
             if (argEx != null && !isValidationSummaryEx && argEx.ParamName != null)
             {
-                var paramMsgIndex = argEx.Message.LastIndexOf("Parameter name:");
+                var paramMsgIndex = argEx.Message.LastIndexOf("Parameter name:", StringComparison.Ordinal);
                 var errorMsg = paramMsgIndex > 0
                     ? argEx.Message.Substring(0, paramMsgIndex)
                     : argEx.Message;
+
+                if (responseStatus.Errors == null)
+                    responseStatus.Errors = new List<ResponseError>();
 
                 responseStatus.Errors.Add(new ResponseError
                 {
@@ -385,7 +459,204 @@ namespace ServiceStack
                     FieldName = argEx.ParamName,
                     Message = errorMsg,
                 });
+                return;
             }
+
+            var serializationEx = ex as SerializationException;
+            if (serializationEx != null)
+            {
+                var errors = serializationEx.Data["errors"] as List<RequestBindingError>;
+                if (errors != null)
+                {
+                    if (responseStatus.Errors == null)
+                        responseStatus.Errors = new List<ResponseError>();
+
+                    responseStatus.Errors = errors.Select(e => new ResponseError
+                    {
+                        ErrorCode = ex.GetType().Name,
+                        FieldName = e.PropertyName,
+                        Message = e.PropertyValueString != null ? "'{0}' is an Invalid value for '{1}'".Fmt(e.PropertyValueString, e.PropertyName) : "Invalid Value for '{0}'".Fmt(e.PropertyName)
+                    }).ToList();
+                }
+            }
+        }
+
+        public virtual void OnLogError(Type type, string message, Exception innerEx=null)
+        {
+            if (innerEx != null)
+                Log.Error(message, innerEx);
+            else
+                Log.Error(message);
+        }
+
+        public virtual void OnSaveSession(IRequest httpReq, IAuthSession session, TimeSpan? expiresIn = null)
+        {
+            if (httpReq == null) return;
+
+            var sessionKey = SessionFeature.GetSessionKey(session.Id ?? httpReq.GetOrCreateSessionId());
+            session.LastModified = DateTime.UtcNow;
+            this.GetCacheClient().CacheSet(sessionKey, session, expiresIn ?? GetDefaultSessionExpiry(httpReq));
+
+            httpReq.Items[Keywords.Session] = session;
+        }
+
+        /// <summary>
+        /// Inspect or modify ever new UserSession created or resolved from cache. 
+        /// return null if Session is invalid to create new Session.
+        /// </summary>
+        public virtual IAuthSession OnSessionFilter(IAuthSession session, string withSessionId)
+        {
+            if (session == null || !SessionFeature.VerifyCachedSessionId)
+                return session;
+
+            if (session.Id == withSessionId)
+                return session;
+
+            if (Log.IsDebugEnabled)
+            {
+                Log.Debug("ignoring cached sessionId '{0}' which is different to request '{1}'"
+                    .Fmt(session.Id, withSessionId));
+            }
+            return null;
+        }
+
+        public virtual bool AllowSetCookie(IRequest req, string cookieName)
+        {
+            if (!Config.AllowSessionCookies)
+                return cookieName != SessionFeature.SessionId
+                    && cookieName != SessionFeature.PermanentSessionId
+                    && cookieName != SessionFeature.SessionOptionsKey;
+
+            return true;
+        }
+
+        public virtual IRequest TryGetCurrentRequest()
+        {
+            return null;
+        }
+
+        public virtual object OnAfterExecute(IRequest req, object requestDto, object response)
+        {
+            if (req.Response.Dto == null)
+                req.Response.Dto = response;
+
+            return response;
+        }
+
+        public virtual MetadataTypesConfig GetTypesConfigForMetadata(IRequest req)
+        {
+            var typesConfig = new NativeTypesFeature().MetadataTypesConfig;
+            typesConfig.IgnoreTypesInNamespaces.Clear();
+            typesConfig.IgnoreTypes.Add(typeof(ResponseStatus));
+            typesConfig.IgnoreTypes.Add(typeof(ResponseError));
+            return typesConfig;
+        }
+
+        public virtual List<Type> ExportSoapOperationTypes(List<Type> operationTypes)
+        {
+            var types = operationTypes
+                .Where(x => !x.AllAttributes<ExcludeAttribute>()
+                            .Any(attr => attr.Feature.Has(Feature.Soap)))
+                .Where(x => !x.IsGenericTypeDefinition())
+                .ToList();
+            return types;
+        }
+
+        public virtual bool ExportSoapType(Type type)
+        {
+            return !type.IsGenericTypeDefinition() &&
+                   !type.AllAttributes<ExcludeAttribute>()
+                        .Any(attr => attr.Feature.Has(Feature.Soap));
+        }
+
+        public virtual void WriteSoapMessage(IRequest req, System.ServiceModel.Channels.Message message, Stream outputStream)
+        {
+            try
+            {
+                using (var writer = XmlWriter.Create(outputStream, Config.XmlWriterSettings))
+                {
+                    message.WriteMessage(writer);
+                }
+            }
+            catch (Exception ex)
+            {
+                var response = OnServiceException(req, req.Dto, ex);
+                if (response == null || !outputStream.CanSeek)
+                    return;
+
+                outputStream.Position = 0;
+                try
+                {
+                    message = SoapHandler.CreateResponseMessage(response, message.Version, req.Dto.GetType(),
+                        req.GetSoapMessage().Headers.Action == null);
+                    using (var writer = XmlWriter.Create(outputStream, Config.XmlWriterSettings))
+                    {
+                        message.WriteMessage(writer);
+                    }
+                }
+                catch { }
+            }
+            finally
+            {
+                HostContext.CompleteRequest(req);
+            }
+        }
+
+        public virtual IDbConnection GetDbConnection(IRequest req = null)
+        {
+            var dbFactory = Container.TryResolve<IDbConnectionFactory>();
+
+            ConnectionInfo connInfo;
+            if (req != null && (connInfo = req.GetItem(Keywords.DbInfo) as ConnectionInfo) != null)
+            {
+                var dbFactoryExtended = dbFactory as IDbConnectionFactoryExtended;
+                if (dbFactoryExtended == null)
+                    throw new NotSupportedException("ConnectionInfo can only be used with IDbConnectionFactoryExtended");
+
+                if (connInfo.ConnectionString != null && connInfo.ProviderName != null)
+                    return dbFactoryExtended.OpenDbConnectionString(connInfo.ConnectionString, connInfo.ProviderName);
+
+                if (connInfo.ConnectionString != null)
+                    return dbFactoryExtended.OpenDbConnectionString(connInfo.ConnectionString);
+
+                if (connInfo.NamedConnection != null)
+                    return dbFactoryExtended.OpenDbConnection(connInfo.NamedConnection);
+            }
+
+            return dbFactory.OpenDbConnection();
+        }
+
+        public virtual IRedisClient GetRedisClient(IRequest req = null)
+        {
+            return Container.TryResolve<IRedisClientsManager>().GetClient();
+        }
+
+        public virtual ICacheClient GetCacheClient(IRequest req)
+        {
+            return this.GetCacheClient();
+        }
+
+        public virtual MemoryCacheClient GetMemoryCacheClient(IRequest req)
+        {
+            return Container.TryResolve<MemoryCacheClient>();
+        }
+
+        public virtual IMessageProducer GetMessageProducer(IRequest req = null)
+        {
+            return Container.TryResolve<IMessageFactory>().CreateMessageProducer();
+        }
+
+        public virtual IServiceGateway GetServiceGateway(IRequest req)
+        {
+            var factory = Container.TryResolve<IServiceGatewayFactory>();
+            return factory != null ? factory.GetServiceGateway(req) 
+                : Container.TryResolve<IServiceGateway>()
+                ?? new InProcessServiceGateway(req);
+        }
+
+        public virtual IAuthRepository GetAuthRepository(IRequest req = null)
+        {
+            return TryResolve<IAuthRepository>();
         }
     }
 

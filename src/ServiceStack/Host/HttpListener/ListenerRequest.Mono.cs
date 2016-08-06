@@ -38,6 +38,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Web;
+using ServiceStack.Text;
 
 namespace ServiceStack.Host.HttpListener
 {
@@ -74,7 +75,7 @@ namespace ServiceStack.Host.HttpListener
 
             //DB: 30/01/11 - Hack to get around non-seekable stream and received HTTP request
             //Not ending with \r\n?
-            var ms = new MemoryStream(32 * 1024);
+            var ms = MemoryStreamFactory.GetStream(32 * 1024);
             input.CopyTo(ms);
             input = ms;
             ms.WriteByte((byte)'\r');
@@ -237,18 +238,14 @@ namespace ServiceStack.Host.HttpListener
             return String.Compare(ContentType, ct, true, Helpers.InvariantCulture) == 0;
         }
 
-
-
-
-
         void LoadWwwForm()
         {
             using (Stream input = GetSubStream(InputStream))
             {
                 using (StreamReader s = new StreamReader(input, ContentEncoding))
                 {
-                    StringBuilder key = new StringBuilder();
-                    StringBuilder value = new StringBuilder();
+                    var key = StringBuilderCache.Allocate();
+                    var value = StringBuilderCacheAlt.Allocate();
                     int c;
 
                     while ((c = s.Read()) != -1)
@@ -281,6 +278,9 @@ namespace ServiceStack.Host.HttpListener
                         AddRawKeyValue(key, value);
 
                     EndSubStream(input);
+
+                    StringBuilderCache.Free(key);
+                    StringBuilderCacheAlt.Free(key);
                 }
             }
         }
@@ -389,21 +389,20 @@ namespace ServiceStack.Host.HttpListener
 
             public override string ToString()
             {
-                StringBuilder result = new StringBuilder();
+                var sb = StringBuilderCache.Allocate();
                 foreach (string key in AllKeys)
                 {
-                    if (result.Length > 0)
-                        result.Append('&');
+                    if (sb.Length > 0)
+                        sb.Append('&');
 
                     if (key != null && key.Length > 0)
                     {
-                        result.Append(key);
-                        result.Append('=');
+                        sb.Append(key);
+                        sb.Append('=');
                     }
-                    result.Append(Get(key));
+                    sb.Append(Get(key));
                 }
-
-                return result.ToString();
+                return StringBuilderCache.ReturnAndFree(sb);
             }
         }
 
@@ -742,37 +741,37 @@ namespace ServiceStack.Host.HttpListener
                     sb.Length--;
 
                 return sb.ToString();
-
             }
 
             static string GetContentDispositionAttribute(string l, string name)
             {
-                int idx = l.IndexOf(name + "=\"");
+                int idx = l.IndexOf(name + "=\""), begin, end;
                 if (idx < 0)
-                    return null;
-                int begin = idx + name.Length + "=\"".Length;
-                int end = l.IndexOf('"', begin);
-                if (end < 0)
-                    return null;
-                if (begin == end)
-                    return "";
-                return l.Substring(begin, end - begin);
+                {
+                    idx = l.IndexOf(name + "=");
+                    if (idx < 0)
+                        return null;
+                    begin = idx + name.Length + "=".Length;
+                    end = l.IndexOf(';', begin);
+                    if (end < 0)
+                        end = l.Length;
+                }
+                else
+                {
+                    begin = idx + name.Length + "=\"".Length;
+                    end = l.IndexOf('"', begin);
+                    if (end < 0)
+                        return null;
+                }
+                return begin == end ? "" : l.Substring(begin, end - begin);
             }
 
             string GetContentDispositionAttributeWithEncoding(string l, string name)
             {
-                int idx = l.IndexOf(name + "=\"");
-                if (idx < 0)
-                    return null;
-                int begin = idx + name.Length + "=\"".Length;
-                int end = l.IndexOf('"', begin);
-                if (end < 0)
-                    return null;
-                if (begin == end)
-                    return "";
-
-                string temp = l.Substring(begin, end - begin);
-                byte[] source = new byte[temp.Length];
+                var temp = GetContentDispositionAttribute(l, name);
+                if (string.IsNullOrEmpty(temp))
+                    return temp;
+                var source = new byte[temp.Length];
                 for (int i = temp.Length - 1; i >= 0; i--)
                     source[i] = (byte)temp[i];
 

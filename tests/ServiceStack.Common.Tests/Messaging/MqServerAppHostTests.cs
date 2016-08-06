@@ -123,8 +123,8 @@ namespace ServiceStack.Common.Tests.Messaging
 
         public async Task<object> Any(AnyTestMqAsync request)
         {
-            return await Task.Factory.StartNew(() => 
-                new AnyTestMqResponse {CorrelationId = request.Id});
+            return await Task.Factory.StartNew(() =>
+                new AnyTestMqResponse { CorrelationId = request.Id });
         }
 
         public object Post(PostTestMq request)
@@ -161,12 +161,11 @@ namespace ServiceStack.Common.Tests.Messaging
             container.Register(c => createMqServerFn());
 
             var mqServer = container.Resolve<IMessageService>();
-            mqServer.RegisterHandler<AnyTestMq>(ServiceController.ExecuteMessage);
-            mqServer.RegisterHandler<AnyTestMqAsync>(msg 
-             => ServiceController.ExecuteMessage(msg));
-            mqServer.RegisterHandler<PostTestMq>(ServiceController.ExecuteMessage);
-            mqServer.RegisterHandler<ValidateTestMq>(ServiceController.ExecuteMessage);
-            mqServer.RegisterHandler<ThrowGenericError>(ServiceController.ExecuteMessage);
+            mqServer.RegisterHandler<AnyTestMq>(ExecuteMessage);
+            mqServer.RegisterHandler<AnyTestMqAsync>(ExecuteMessage);
+            mqServer.RegisterHandler<PostTestMq>(ExecuteMessage);
+            mqServer.RegisterHandler<ValidateTestMq>(ExecuteMessage);
+            mqServer.RegisterHandler<ThrowGenericError>(ExecuteMessage);
 
             mqServer.Start();
         }
@@ -303,7 +302,6 @@ namespace ServiceStack.Common.Tests.Messaging
                     var errorMsg = mqClient.Get<ValidateTestMq>(QueueNames<ValidateTestMq>.Dlq, null);
                     mqClient.Ack(errorMsg);
 
-                    errorMsg.GetBody().PrintDump();
                     Assert.That(errorMsg.Error.ErrorCode, Is.EqualTo("PositiveIntegersOnly"));
 
                     request = new ValidateTestMq { Id = 10 };
@@ -330,7 +328,6 @@ namespace ServiceStack.Common.Tests.Messaging
                     var msg = mqClient.Get<ThrowGenericError>(QueueNames<ThrowGenericError>.Dlq, null);
                     mqClient.Ack(msg);
 
-                    msg.PrintDump();
                     Assert.That(msg.Error.ErrorCode, Is.EqualTo("ArgumentException"));
                 }
             }
@@ -355,7 +352,6 @@ namespace ServiceStack.Common.Tests.Messaging
                     var errorMsg = mqClient.Get<ValidateTestMqResponse>(requestMsg.ReplyTo, null);
                     mqClient.Ack(errorMsg);
 
-                    errorMsg.GetBody().PrintDump();
                     Assert.That(errorMsg.GetBody().ResponseStatus.ErrorCode, Is.EqualTo("PositiveIntegersOnly"));
 
                     request = new ValidateTestMq { Id = 10 };
@@ -390,7 +386,6 @@ namespace ServiceStack.Common.Tests.Messaging
                     var msg = mqClient.Get<ErrorResponse>(requestMsg.ReplyTo, null);
                     mqClient.Ack(msg);
 
-                    msg.PrintDump();
                     Assert.That(msg.GetBody().ResponseStatus.ErrorCode, Is.EqualTo("ArgumentException"));
                 }
             }

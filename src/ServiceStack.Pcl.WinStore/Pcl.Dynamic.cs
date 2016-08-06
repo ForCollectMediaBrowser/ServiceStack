@@ -1,7 +1,7 @@
 //Copyright (c) Service Stack LLC. All Rights Reserved.
 //License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
 
-#if !PCL
+#if !(PCL || LITE)
 
 using System;
 using System.Collections.Generic;
@@ -87,6 +87,9 @@ namespace ServiceStack
         }
     }
 
+//TODO: Workout how to fix broken CoreCLR SL5 build that uses dynamic
+#if !(SL5 && CORECLR)
+
     public class DynamicJson : DynamicObject
     {
         private readonly IDictionary<string, object> _hash = new Dictionary<string, object>();
@@ -142,6 +145,15 @@ namespace ServiceStack
                     result = Deserialize(json);
                     return true;
                 }
+                else if (json.TrimStart(' ').StartsWith("[", StringComparison.Ordinal))
+                {
+                    result = JsonArrayObjects.Parse(json).Select(a =>
+                    {
+                        var hash = a.ToDictionary<KeyValuePair<string, string>, string, object>(entry => entry.Key, entry => entry.Value);
+                        return new DynamicJson(hash);
+                    }).ToArray();
+                    return true;
+                }
                 result = json;
                 return _hash[name] == result;
             }
@@ -156,7 +168,7 @@ namespace ServiceStack
 
         internal static string Underscored(IEnumerable<char> pascalCase)
         {
-            var sb = new StringBuilder();
+            var sb = StringBuilderCache.Allocate();
             var i = 0;
             foreach (var c in pascalCase)
             {
@@ -167,9 +179,10 @@ namespace ServiceStack
                 sb.Append(c);
                 i++;
             }
-            return sb.ToString().ToLowerInvariant();
+            return StringBuilderCache.ReturnAndFree(sb).ToLowerInvariant();
         }
     }
+#endif
 }
 
 #endif

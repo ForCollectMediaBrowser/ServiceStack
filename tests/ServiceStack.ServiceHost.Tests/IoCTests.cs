@@ -6,6 +6,7 @@ using NUnit.Framework;
 using ServiceStack.Commands;
 using ServiceStack.ServiceHost.Tests.Support;
 using Funq;
+using ServiceStack.Configuration;
 
 namespace ServiceStack.ServiceHost.Tests
 {
@@ -222,6 +223,126 @@ namespace ServiceStack.ServiceHost.Tests
             Assert.That(fooCmd.Execute(), Is.EqualTo(container.Resolve<Foo>()));
             var barCmd = container.Resolve<BarCommand>();
             Assert.That(barCmd.Execute(), Is.EqualTo(container.Resolve<Bar>()));
+        }
+
+        [Test]
+        public void Can_resolve_using_untyped_Container_Api()
+        {
+            var container = new Container();
+            container.Register(c => new Foo());
+
+            var instance = container.TryResolve(typeof(Foo));
+            Assert.That(instance, Is.Not.Null);
+        }
+
+        class CustomAdapter : IContainerAdapter
+        {
+            public T TryResolve<T>()
+            {
+                if (typeof(T) == typeof(IFoo))
+                    return (T)(object)new Foo();
+                return default(T);
+            }
+
+            public T Resolve<T>()
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        [Test]
+        public void Does_fallback_to_Funq_when_missing_in_Adapter()
+        {
+            var container = new Container { Adapter = new CustomAdapter() };
+            container.Register<IBar>(c => new Bar());
+
+            Assert.That(container.TryResolve<IFoo>(), Is.Not.Null);
+            Assert.That(container.TryResolve<IBar>(), Is.Not.Null);
+        }
+
+        [Test]
+        public void Can_autowire_named_instances()
+        {
+            var container = new Container();
+            container.Register<IFoo>(c => new Foo());
+            container.Register<IBar>(c => new Bar());
+            container.Register<int>(c => 100);
+
+            container.RegisterAutoWired<AutoWireService>("one");
+            container.RegisterAutoWired<AutoWireService>("two");
+
+            var one = container.ResolveNamed<AutoWireService>("one");
+            var two = container.ResolveNamed<AutoWireService>("two");
+            Assert.That(one, Is.Not.Null);
+            Assert.AreNotSame(one, two);
+        }
+        
+        [Test]
+        public void Can_autowireAs_named_instances()
+        {
+            var container = new Container();
+            container.Register<IFoo>(c => new Foo());
+            container.Register<IBar>(c => new Bar());
+            container.Register<int>(c => 100);
+
+            container.RegisterAutoWiredAs<AutoWireService, IService>("one");
+            container.RegisterAutoWiredAs<AutoWireService, IService>("two");
+
+            var one = container.ResolveNamed<IService>("one");
+            var two = container.ResolveNamed<IService>("two");
+            Assert.That(one, Is.Not.Null);
+            Assert.AreNotSame(one, two);
+        }
+
+        [Test]
+        public void Can_registerAs_named_instances()
+        {
+            var container = new Container();
+            container.Register<IFoo>(c => new Foo());
+            container.Register<IBar>(c => new Bar());
+            container.Register<int>(c => 100);
+
+            container.RegisterAs<AutoWireService, IService>("one");
+            container.RegisterAs<AutoWireService, IService>("two");
+
+            var one = container.ResolveNamed<IService>("one");
+            var two = container.ResolveNamed<IService>("two");
+            Assert.That(one, Is.Not.Null);
+            Assert.AreNotSame(one, two);
+        }
+
+        [Test]
+        public void Can_registerAutoWiredType_as_named_instance()
+        {
+            var container = new Container();
+            container.Register<IFoo>(c => new Foo());
+            container.Register<IBar>(c => new Bar());
+            container.Register<int>(c => 100);
+
+            container.RegisterAutoWiredType("one", typeof(AutoWireService), typeof(IService));
+            container.RegisterAutoWiredType("two", typeof(AutoWireService), typeof(IService));
+
+            var one = container.ResolveNamed<IService>("one");
+            var two = container.ResolveNamed<IService>("two");
+            Assert.That(one, Is.Not.Null);
+            Assert.AreNotSame(one, two);
+        }
+
+        [Test]
+        public void Can_registerAutoWiredType_named_instance()
+        {
+            var container = new Container();
+            container.Register<IFoo>(c => new Foo());
+            container.Register<IBar>(c => new Bar());
+            container.Register<int>(c => 100);
+
+            container.RegisterAutoWiredType("one", typeof(AutoWireService));
+            container.RegisterAutoWiredType("two", typeof(AutoWireService));
+
+            var one = container.ResolveNamed<AutoWireService>("one");
+            var two = container.ResolveNamed<AutoWireService>("two");
+            Assert.That(one, Is.Not.Null);
+            Assert.AreNotSame(one, two);
         }
     }
 }

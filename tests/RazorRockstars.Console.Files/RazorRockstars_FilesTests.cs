@@ -16,11 +16,8 @@ namespace RazorRockstars.Console.Files
     [TestFixture]
     public class RazorRockstars_FilesTests
     {
-        public const string ListeningOn = "http://*:1337/";
-        public const string Host = "http://localhost:1337";
-
-        //private const string ListeningOn = "http://*:1337/subdir/subdir2/";
-        //private const string Host = "http://localhost:1337/subdir/subdir2";
+        public const string ListeningOn = "http://*:2337/";
+        public const string Host = "http://localhost:2337";
 
         private const string BaseUri = Host + "/";
 
@@ -67,7 +64,7 @@ namespace RazorRockstars.Console.Files
         {
             var razorFormat = RazorFormat.Instance;
             var mockReq = new MockHttpRequest { OperationName = "RazorInstance" };
-            var mockRes = new MockHttpResponse();
+            var mockRes = new MockHttpResponse(mockReq);
             var dto = new RockstarsResponse { Results = Rockstar.SeedData.ToList() };
             razorFormat.ProcessRequest(mockReq, mockRes, dto);
             var html = mockRes.ReadAsString();
@@ -83,11 +80,30 @@ namespace RazorRockstars.Console.Files
                 if (r.StatusCode != HttpStatusCode.OK)
                     Assert.Fail(url + " did not return 200 OK");
             });
+            //text.Print();
             foreach (var item in containsItems)
             {
                 if (!text.Contains(item))
                 {
                     Assert.Fail(item + " was not found in " + url);
+                }
+            }
+        }
+
+        public void Assert200Without(string url, params string[] withoutStrings)
+        {
+            url.Print();
+            var text = url.GetStringFromUrl(AcceptContentType, responseFilter: r =>
+            {
+                if (r.StatusCode != HttpStatusCode.OK)
+                    Assert.Fail(url + " did not return 200 OK");
+            });
+            text.Print();
+            foreach (var item in withoutStrings)
+            {
+                if (text.Contains(item))
+                {
+                    Assert.Fail(item + " was found in " + url);
                 }
             }
         }
@@ -172,6 +188,7 @@ namespace RazorRockstars.Console.Files
         static string ViewM_Pages_Dir2_Default = "<!--view:Pages/Dir2/default.md-->";
         static string View_RequestFilters = "<!--view:RequestFilters.cshtml-->";
         static string View_RequestFiltersPage = "<!--view:RequestFiltersPage.cshtml-->";
+        static string View_Content_ContentPage = "<!--view:Content/content-page.cshtml-->";
 
         static string Template_Layout = "<!--template:_Layout.cshtml-->";
         static string Template_Pages_Layout = "<!--template:Pages/_Layout.cshtml-->";
@@ -291,6 +308,16 @@ namespace RazorRockstars.Console.Files
         }
 
         [Test]
+        public void Can_get_ContentPages_via_HttpResult_View()
+        {
+            Assert200(Host + "/contentpages/NoModelNoController.cshtml",
+                ViewNoModelNoController, Template_SimpleLayout, ViewRazorPartial, ViewMarkdownPartial);
+
+            Assert200(Host + "/contentpages/Content/content-page.cshtml",
+                View_Content_ContentPage, Template_SimpleLayout);
+        }
+
+        [Test]
         public void Can_get_default_file()
         {
             Assert200(Host + "/default_file",
@@ -406,6 +433,69 @@ namespace RazorRockstars.Console.Files
         public void Does_not_allow_direct_access_to_ViewPages()
         {
             AssertStatus(Host + "/Views/SimpleView", HttpStatusCode.NotFound);
+        }
+
+        [Test]
+        public void Does_return_AddServiceStackReference_Endpoints()
+        {
+            Assert200(Host + "/types/csharp", "/* Options:",
+                "//GlobalNamespace: ",
+                "//MakePartial: True",
+                "//MakeVirtual: True",
+                "//MakeDataContractsExtensible: False",
+                "//AddReturnMarker: True",
+                "//AddDescriptionAsComments: True",
+                "//AddDataContractAttributes: False",
+                "//AddIndexesToDataMembers: False",
+                "//AddGeneratedCodeAttributes: False",
+                "//AddResponseStatus: False",
+                "//AddImplicitVersion: ",
+                "//InitializeCollections: True",
+                "//IncludeTypes: ",
+                "//ExcludeTypes: ",
+                "//AddDefaultXmlNamespace: http://schemas.servicestack.net/types",
+                "using System;",
+                "public partial class ACodeGenTest",
+                "public virtual int FirstField { get; set; }",
+                "IReturn<ACodeGenTestResponse>",
+                "///Description for ACodeGenTest",
+                "///Description for FirstField",
+                "///Description for FirstResult",
+                "///Description for SecondResult",
+                "[ApiMember(Description=\"Description for SecondResult\")]",
+                "[DataContract]{0}    public partial class ACodeGenTestResponse".Fmt(Environment.NewLine),
+                "[DataMember]{0}        public virtual int FirstResult".Fmt(Environment.NewLine)
+            );
+
+            Assert200(Host + "/types/csharp");
+            Assert200(Host + "/types/csharp?MakePartial=false", "MakePartial: False", "public class ACodeGenTest");
+            Assert200(Host + "/types/csharp?MakeVirtual=false", "MakeVirtual: False", "public int FirstField");
+            Assert200(Host + "/types/csharp?MakeDataContractsExtensible=true", "MakeDataContractsExtensible: True", "ExtensionDataObject ExtensionData");
+            Assert200(Host + "/types/csharp?AddDescriptionAsComments=false", "AddDescriptionAsComments: False", "[Description(\"Description for ACodeGenTest\")]", "[Description(\"Description for FirstField\")]");
+            Assert200Without(Host + "/types/csharp?AddDescriptionAsComments=false", "AddDescriptionAsComments: True", "///Description for ACodeGenTest", "///Description for FirstField");
+            Assert200(Host + "/types/csharp?AddDataContractAttributes=true", "AddDataContractAttributes: True",
+                "[DataContract]{0}    public partial class ACodeGenTest".Fmt(Environment.NewLine),
+                "[DataMember]{0}        public virtual int FirstField".Fmt(Environment.NewLine));
+            Assert200(Host + "/types/csharp?AddIndexesToDataMembers=true", "AddIndexesToDataMembers: True",
+                "[DataMember(Order=1)]{0}        public virtual int FirstResult".Fmt(Environment.NewLine));
+            Assert200(Host + "/types/csharp?AddResponseStatus=true", "AddResponseStatus: True",
+                "public virtual int SecondResult {{ get; set; }}{0}{0}        public virtual ResponseStatus ResponseStatus".Fmt(Environment.NewLine));
+            Assert200(Host + "/types/csharp?AddGeneratedCodeAttributes=true", "AddGeneratedCodeAttributes: True", "[GeneratedCode(");
+            Assert200(Host + "/types/csharp?AddImplicitVersion=1", "AddImplicitVersion: 1", "Version = 1");
+            Assert200(Host + "/types/csharp?InitializeCollections=true", "InitializeCollections: True", "SecondFields = new List<string>");
+            Assert200(Host + "/types/csharp?IncludeTypes=ACodeGenTest", "IncludeTypes: ACodeGenTest", "public partial class ACodeGenTest");
+            Assert200Without(Host + "/types/csharp?IncludeTypes=ACodeGenTest", "public partial class ACodeGenTestResponse");
+            Assert200(Host + "/types/csharp?IncludeTypes=ACodeGenTest.*", "public partial class ACodeGenTestResponse");
+            Assert200Without(Host + "/types/csharp?ExcludeTypes=ACodeGenTestResponse", "public partial class ACodeGenTestResponse");
+            Assert200(Host + "/types/csharp?AddDefaultXmlNamespace=example.org&AddDataContractAttributes=true", "AddDefaultXmlNamespace: example.org", "[assembly: ContractNamespace(\"example.org\",");
+
+            Assert200(Host + "/types/fsharp", "(* Options:", "open System");
+            Assert200(Host + "/types/vbnet", "' Options:", "Imports System");
+            Assert200(Host + "/types/swift", "/* Options:", "import Foundation;");
+            Assert200(Host + "/types/java", "/* Options:", "import java.math.*;");
+            Assert200(Host + "/types/kotlin", "/* Options:", "import java.math.*");
+            Assert200(Host + "/types/typescript", "/* Options:", "export interface IReturnVoid");
+            Assert200(Host + "/types/typescript.d", "/* Options:", "interface IReturnVoid");
         }
     }
 }

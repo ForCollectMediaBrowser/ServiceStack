@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using ServiceStack.Text;
 
 namespace ServiceStack
 {
@@ -8,6 +10,11 @@ namespace ServiceStack
         public static bool IsEmpty<T>(this ICollection<T> collection)
         {
             return collection == null || collection.Count == 0;
+        }
+
+        public static bool IsEmpty<T>(this T[] collection)
+        {
+            return collection == null || collection.Length == 0;
         }
 
         public static HashSet<T> ToHashSet<T>(this IEnumerable<T> items)
@@ -35,7 +42,7 @@ namespace ServiceStack
                 action(i++, value);
             }
         }
-        
+
         public static List<To> Map<To, From>(this IEnumerable<From> items, Func<From, To> converter)
         {
             if (items == null)
@@ -90,9 +97,42 @@ namespace ServiceStack
             return default(T);
         }
 
-        public static bool EquivalentTo<T>(this IEnumerable<T> thisList, IEnumerable<T> otherList)
+        public static bool EquivalentTo(this byte[] bytes, byte[] other)
         {
-            if (thisList == null || otherList == null) return thisList == otherList;
+            var compare = 0;
+            for (var i = 0; i < other.Length; i++)
+                compare |= other[i] ^ bytes[i];
+
+            return compare == 0;
+        }
+
+        public static bool EquivalentTo<T>(this T[] array, T[] otherArray, Func<T, T, bool> comparer = null)
+        {
+            if (array == null || otherArray == null)
+                return array == otherArray;
+
+            if (array.Length != otherArray.Length)
+                return false;
+
+            if (comparer == null)
+                comparer = (v1, v2) => v1.Equals(v2);
+
+            for (var i = 0; i < array.Length; i++)
+            {
+                if (!comparer(array[i], otherArray[i]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        public static bool EquivalentTo<T>(this IEnumerable<T> thisList, IEnumerable<T> otherList, Func<T, T, bool> comparer = null)
+        {
+            if (comparer == null)
+                comparer = (v1, v2) => v1.Equals(v2);
+
+            if (thisList == null || otherList == null)
+                return thisList == otherList;
 
             var otherEnum = otherList.GetEnumerator();
             foreach (var item in thisList)
@@ -106,10 +146,39 @@ namespace ServiceStack
                     return thisIsDefault && otherIsDefault;
                 }
 
-                if (!item.Equals(otherEnum.Current)) return false;
+                if (!comparer(item, otherEnum.Current)) return false;
             }
             var hasNoMoreLeftAsWell = !otherEnum.MoveNext();
             return hasNoMoreLeftAsWell;
+        }
+
+        public static bool EquivalentTo<K, V>(this IDictionary<K, V> a, IDictionary<K, V> b, Func<V,V,bool> comparer = null)
+        {
+            if (comparer == null)
+                comparer = (v1, v2) => v1.Equals(v2);
+
+            if (a == null || b == null)
+                return a == b;
+
+            if (a.Count != b.Count)
+                return false;
+
+            foreach (var entry in a)
+            {
+                V value;
+                if (!b.TryGetValue(entry.Key, out value))
+                    return false;
+                if (entry.Value == null || value == null)
+                {
+                    if (entry.Value == null && value == null)
+                        continue;
+
+                    return false;
+                }
+                if (!comparer(entry.Value, value))
+                    return false;
+            }
+            return true;
         }
 
         public static IEnumerable<T[]> BatchesOf<T>(this IEnumerable<T> sequence, int batchSize)
@@ -161,7 +230,12 @@ namespace ServiceStack
         /// </summary>
         public static IEnumerable<T> Safe<T>(this IEnumerable<T> enumerable)
         {
-            return enumerable ?? new T[0];
+            return enumerable ?? TypeConstants<T>.EmptyArray;
+        }
+
+        public static IEnumerable Safe(this IEnumerable enumerable)
+        {
+            return enumerable ?? TypeConstants.EmptyObjectArray;
         }
     }
 }

@@ -25,15 +25,27 @@ namespace ServiceStack
         }
 
         public RequiresAnyPermissionAttribute(params string[] permissions)
-            : this(ApplyTo.All, permissions) { }
+            : this(ApplyTo.All, permissions)
+        { }
 
         public override void Execute(IRequest req, IResponse res, object requestDto)
         {
+            if (HostContext.HasValidAuthSecret(req))
+                return;
+
             base.Execute(req, res, requestDto); //first check if session is authenticated
             if (res.IsClosed) return; //AuthenticateAttribute already closed the request (ie auth failed)
 
             var session = req.GetSession();
-            if (HasAnyPermissions(req, session)) return;
+
+            var authRepo = HostContext.AppHost.GetAuthRepository(req);
+            using (authRepo as IDisposable)
+            {
+                if (session != null && session.HasRole(RoleNames.Admin, authRepo))
+                    return;
+
+                if (HasAnyPermissions(req, session, authRepo)) return;
+            }
 
             if (DoHtmlRedirectIfConfigured(req, res)) return;
 
@@ -42,32 +54,36 @@ namespace ServiceStack
             res.EndRequest();
         }
 
-        public bool HasAnyPermissions(IRequest req, IAuthSession session, IAuthRepository userAuthRepo = null)
+        public bool HasAnyPermissions(IRequest req, IAuthSession session, IAuthRepository authRepo)
         {
-            if (HasAnyPermissions(session)) return true;
+            if (HasAnyPermissions(session, authRepo)) return true;
 
-            if (userAuthRepo == null)
-                userAuthRepo = req.TryResolve<IAuthRepository>();
+            if (authRepo == null)
+                authRepo = HostContext.AppHost.GetAuthRepository(req);
 
-            if (userAuthRepo == null) return false;
+            if (authRepo == null)
+                return false;
 
-            var userAuth = userAuthRepo.GetUserAuth(session, null);
-            session.UpdateSession(userAuth);
-
-            if (HasAnyPermissions(session))
+            using (authRepo as IDisposable)
             {
-                req.SaveSession(session);
-                return true;
+                var userAuth = authRepo.GetUserAuth(session, null);
+                session.UpdateSession(userAuth);
+
+                if (HasAnyPermissions(session, authRepo))
+                {
+                    req.SaveSession(session);
+                    return true;
+                }
+                return false;
             }
-            return false;
         }
 
-        public bool HasAnyPermissions(IAuthSession session)
+        public bool HasAnyPermissions(IAuthSession session, IAuthRepository authRepo)
         {
             return this.RequiredPermissions
                 .Any(requiredPermission => session != null
-                    && session.UserAuthId != null 
-                    && session.HasPermission(requiredPermission));
+                    && session.UserAuthId != null
+                    && session.HasPermission(requiredPermission, authRepo));
         }
     }
 

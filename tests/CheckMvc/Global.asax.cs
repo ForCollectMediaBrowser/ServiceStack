@@ -3,6 +3,9 @@ using System.Web.Routing;
 using Check.ServiceInterface;
 using Funq;
 using ServiceStack;
+using ServiceStack.Mvc;
+using ServiceStack.Redis;
+using ServiceStack.Text;
 
 namespace CheckMvc
 {
@@ -13,6 +16,13 @@ namespace CheckMvc
 
         public override void Configure(Container container)
         {
+            //Set MVC to use the same Funq IOC as ServiceStack
+            ControllerBuilder.Current.SetControllerFactory(new FunqControllerFactory(container));
+
+            container.Register<IRedisClientsManager>(c =>
+                new RedisManagerPool());
+
+            container.Register(c => c.Resolve<IRedisClientsManager>().GetCacheClient());
         }
     }
 
@@ -22,6 +32,9 @@ namespace CheckMvc
     {
         protected void Application_Start()
         {
+            JsConfig.DateHandler = DateHandler.ISO8601;
+            JsConfig.EmitCamelCaseNames = true;
+
             AreaRegistration.RegisterAllAreas();
 
             //WebApiConfig.Register(GlobalConfiguration.Configuration);

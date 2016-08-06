@@ -46,9 +46,13 @@ namespace ServiceStack.Messaging.Rcon
             Publish(queueName, MessageFactory.Create(requestDto));
         }
 
-        public void SendAllOneWay<TResponse>(IEnumerable<IReturn<TResponse>> requests)
+        public void SendAllOneWay(IEnumerable<object> requests)
         {
-            throw new NotImplementedException();
+            if (requests == null) return;
+            foreach (var request in requests)
+            {
+                SendOneWay(request);
+            }
         }
 
         /// <summary>

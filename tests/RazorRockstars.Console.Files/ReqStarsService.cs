@@ -6,13 +6,13 @@ using System.Linq;
 using System.Net;
 using System.Runtime.Serialization;
 using System.Threading;
+using System.Web.ModelBinding;
 using NUnit.Framework;
 using ServiceStack;
 using ServiceStack.Data;
 using ServiceStack.Host;
 using ServiceStack.Logging;
 using ServiceStack.MsgPack;
-using ServiceStack.NetSerializer;
 using ServiceStack.OrmLite;
 using ServiceStack.Text;
 using ServiceStack.Web;
@@ -31,6 +31,27 @@ namespace RazorRockstars.Console.Files
     /// Content Negotiation built-in, i.e. by default each method/route is automatically available in every registered Content-Type (HTTP Only).
     /// New API are also available in ServiceStack's typed service clients (they're actually even more succinct :)
     /// Any Views rendered is based on Request or Returned DTO type, see: http://razor.servicestack.net/#unified-stack
+
+    [System.ComponentModel.Description("Description for ACodeGenTest")]
+    public class ACodeGenTest
+    {
+        [ServiceStack.DataAnnotations.Description("Description for FirstField")]
+        public int FirstField { get; set; }
+
+        public List<string> SecondFields { get; set; }
+    }
+
+    [DataContract]
+    public class ACodeGenTestResponse
+    {
+        [DataMember]
+        [ServiceStack.DataAnnotations.Description("Description for FirstResult")]
+        public int FirstResult { get; set; }
+
+        [DataMember]
+        [ApiMember(Description = "Description for SecondResult")]
+        public int SecondResult { get; set; }
+    }
 
     [Route("/reqstars/search", "GET")]
     [Route("/reqstars/aged/{Age}")]
@@ -61,6 +82,12 @@ namespace RazorRockstars.Console.Files
 
     [Route("/reqstars/{Id}", "GET")]
     public class GetReqstar : IReturn<Reqstar>
+    {
+        public int Id { get; set; }
+    }
+
+    [Route("/cached/reqstars/{Id}", "GET")]
+    public class GetCachedReqstar : IReturn<Reqstar>
     {
         public int Id { get; set; }
     }
@@ -144,6 +171,11 @@ namespace RazorRockstars.Console.Files
             new Reqstar(3, "Foo2", "Bar2", 20), 
         };
 
+        public object Any(ACodeGenTest request)
+        {
+            return new ACodeGenTestResponse { FirstResult = request.FirstField };
+        }
+
         [EnableCors]
         public void Options(Reqstar reqstar) { }
 
@@ -191,6 +223,12 @@ namespace RazorRockstars.Console.Files
         public Reqstar Get(GetReqstar request)
         {
             return Db.SingleById<Reqstar>(request.Id);
+        }
+
+        public object Get(GetCachedReqstar request)
+        {
+            return Request.ToOptimizedResultUsingCache(Cache, request.GetType().Name, () =>
+                Db.SingleById<Reqstar>(request.Id));
         }
 
         public object Post(Reqstar request)
@@ -381,8 +419,8 @@ namespace RazorRockstars.Console.Files
     [TestFixture]
     public class ReqStarsServiceTests
     {
-        private const string ListeningOn = "http://*:1337/";
-        public const string Host = "http://localhost:1337";
+        private const string ListeningOn = "http://*:2337/";
+        public const string Host = "http://localhost:2337";
 
         private const string BaseUri = Host + "/";
 
@@ -521,7 +559,6 @@ namespace RazorRockstars.Console.Files
         public void Does_allow_sending_collections(IServiceClient client)
         {
             var results = client.Send<List<Reqstar>>(new ReqstarsByNames { "Foo", "Foo2" });
-            results.PrintDump();
         }
 
         [Test, TestCaseSource("RestClients")]
@@ -539,13 +576,13 @@ namespace RazorRockstars.Console.Files
         {
             var webReq = (HttpWebRequest)WebRequest.Create(Host + "/reqstars");
             webReq.Method = "OPTIONS";
-            using (var webRes = webReq.GetResponse())
+            using (var r = webReq.GetResponse())
             {
-                Assert.That(webRes.Headers["Access-Control-Allow-Origin"], Is.EqualTo("*"));
-                Assert.That(webRes.Headers["Access-Control-Allow-Methods"], Is.EqualTo("GET, POST, PUT, DELETE, OPTIONS"));
-                Assert.That(webRes.Headers["Access-Control-Allow-Headers"], Is.EqualTo("Content-Type"));
+                Assert.That(r.Headers[HttpHeaders.AllowOrigin], Is.EqualTo(CorsFeature.DefaultOrigin));
+                Assert.That(r.Headers[HttpHeaders.AllowMethods], Is.EqualTo(CorsFeature.DefaultMethods));
+                Assert.That(r.Headers[HttpHeaders.AllowHeaders], Is.EqualTo(CorsFeature.DefaultHeaders));
 
-                var response = webRes.GetResponseStream().ReadFully();
+                var response = r.GetResponseStream().ReadFully();
                 Assert.That(response.Length, Is.EqualTo(0));
             }
         }
@@ -961,6 +998,24 @@ namespace RazorRockstars.Console.Files
             Assert.That(html, Is.StringContaining("<!--view:GetReqstar.cshtml-->"));
             Assert.That(html, Is.StringContaining("<!--view:CustomReqstar.cshtml-->"));
         }
+
+        [Test]
+        public void Does_render_cached_response()
+        {
+            var html1 = "{0}/cached/reqstars/1".Fmt(Host)
+                .GetStringFromUrl();
+
+            Assert.That(html1, Is.StringContaining("<!--view:GetCachedReqstar.cshtml-->"));
+
+            var html2 = "{0}/cached/reqstars/1".Fmt(Host)
+                .GetStringFromUrl();
+
+            Assert.That(html2, Is.StringContaining("<!--view:GetCachedReqstar.cshtml-->"));
+
+            Assert.That(html1, Is.EqualTo(html2));
+
+            html2.Print();
+        }
     }
-    
+
 }

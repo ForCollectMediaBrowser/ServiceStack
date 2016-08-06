@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Threading;
 using Funq;
 using NUnit.Framework;
+using ServiceStack.Common.Tests;
 using ServiceStack.Configuration;
 using ServiceStack.Shared.Tests;
 using ServiceStack.Text;
+using ServiceStack.Web;
 
 namespace ServiceStack.WebHost.Endpoints.Tests
 {
@@ -24,9 +26,16 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             ((IRelease)Container.Adapter).Release(instance);
         }
 
-        public override void OnEndRequest()
+        public override void OnEndRequest(IRequest request = null)
         {
-            base.OnEndRequest();
+            base.OnEndRequest(request);
+        }
+
+        public override object OnPreExecuteServiceFilter(IService service, object request, IRequest httpReq, IResponse httpRes)
+        {
+            if (service is IocScopeService)
+                service.InjectRequestIntoDependencies(httpReq);
+            return request;
         }
     }
 
@@ -74,7 +83,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
     [TestFixture]
     public abstract class IocServiceTests
     {
-        private const int WaitForRequestCleanup = 100;
+        private const int WaitForRequestCleanup = 200;
 
         public abstract IServiceClient CreateClient(ResetIoc request = null);
 
@@ -86,13 +95,13 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             {
                 var response = client.Get<IocResponse>("ioc");
                 var expected = new List<string> {
-					typeof(FunqDepCtor).Name,
-					typeof(AltDepCtor).Name,
-					typeof(FunqDepProperty).Name,
-					typeof(FunqDepDisposableProperty).Name,
-					typeof(AltDepProperty).Name,
-					typeof(AltDepDisposableProperty).Name,
-				};
+                    typeof(FunqDepCtor).Name,
+                    typeof(AltDepCtor).Name,
+                    typeof(FunqDepProperty).Name,
+                    typeof(FunqDepDisposableProperty).Name,
+                    typeof(AltDepProperty).Name,
+                    typeof(AltDepDisposableProperty).Name,
+                };
 
                 //Console.WriteLine(response.Results.Dump());
                 Assert.That(expected.EquivalentTo(response.Results));
@@ -111,13 +120,13 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             {
                 var response = client.Get<IocResponse>("iocasync");
                 var expected = new List<string> {
-					typeof(FunqDepCtor).Name,
-					typeof(AltDepCtor).Name,
-					typeof(FunqDepProperty).Name,
-					typeof(FunqDepDisposableProperty).Name,
-					typeof(AltDepProperty).Name,
-					typeof(AltDepDisposableProperty).Name,
-				};
+                    typeof(FunqDepCtor).Name,
+                    typeof(AltDepCtor).Name,
+                    typeof(FunqDepProperty).Name,
+                    typeof(FunqDepDisposableProperty).Name,
+                    typeof(AltDepProperty).Name,
+                    typeof(AltDepDisposableProperty).Name,
+                };
 
                 //Console.WriteLine(response.Results.Dump());
                 Assert.That(expected.EquivalentTo(response.Results));
@@ -175,11 +184,11 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             var response1 = client.Get<IocScopeResponse>("iocscope");
             var response2 = client.Get<IocScopeResponse>("iocscope");
 
-            response1.PrintDump();
-
             Assert.That(response2.Results[typeof(FunqSingletonScope).Name], Is.EqualTo(1));
             Assert.That(response2.Results[typeof(FunqRequestScope).Name], Is.EqualTo(2));
             Assert.That(response2.Results[typeof(FunqNoneScope).Name], Is.EqualTo(4));
+
+            Assert.That(response2.InjectsRequest, Is.EqualTo(2));
 
             Thread.Sleep(WaitForRequestCleanup);
 
@@ -194,9 +203,6 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             var client = CreateClient();
             var response1 = client.Get<IocScopeResponse>("iocscopeasync");
             var response2 = client.Get<IocScopeResponse>("iocscopeasync");
-
-            response1.PrintDump();
-            response2.PrintDump();
 
             Assert.That(response2.Results[typeof(FunqSingletonScope).Name], Is.EqualTo(1));
             Assert.That(response2.Results[typeof(FunqRequestScope).Name], Is.EqualTo(2));
@@ -262,13 +268,11 @@ namespace ServiceStack.WebHost.Endpoints.Tests
                 var response = client.Get(new ActionAttr());
 
                 var expected = new List<string> {
-					typeof(FunqDepProperty).Name,
-					typeof(FunqDepDisposableProperty).Name,
-					typeof(AltDepProperty).Name,
-					typeof(AltDepDisposableProperty).Name,
-				};
-
-                response.Results.PrintDump();
+                    typeof(FunqDepProperty).Name,
+                    typeof(FunqDepDisposableProperty).Name,
+                    typeof(AltDepProperty).Name,
+                    typeof(AltDepDisposableProperty).Name,
+                };
 
                 Assert.That(expected.EquivalentTo(response.Results));
 
@@ -289,13 +293,11 @@ namespace ServiceStack.WebHost.Endpoints.Tests
                 var response = client.Get(new ActionAttrAsync());
 
                 var expected = new List<string> {
-					typeof(FunqDepProperty).Name,
-					typeof(FunqDepDisposableProperty).Name,
-					typeof(AltDepProperty).Name,
-					typeof(AltDepDisposableProperty).Name,
-				};
-
-                response.Results.PrintDump();
+                    typeof(FunqDepProperty).Name,
+                    typeof(FunqDepDisposableProperty).Name,
+                    typeof(AltDepProperty).Name,
+                    typeof(AltDepDisposableProperty).Name,
+                };
 
                 Assert.That(expected.EquivalentTo(response.Results));
 

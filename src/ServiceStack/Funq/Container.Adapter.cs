@@ -7,64 +7,98 @@ using System.Threading;
 using ServiceStack;
 using ServiceStack.Configuration;
 using System;
+using ServiceStack.Text;
 
 namespace Funq
 {
-	public partial class Container : IResolver
-	{
+    public partial class Container : IResolver
+    {
         public IContainerAdapter Adapter { get; set; }
 
-		/// <summary>
-		/// Register an autowired dependency
-		/// </summary>
-		/// <typeparam name="T"></typeparam>
-		public IRegistration<T> RegisterAutoWired<T>()
-		{
-			var serviceFactory = GenerateAutoWireFn<T>();
-			return this.Register(serviceFactory);
-		}
+        /// <summary>
+        /// Register an autowired dependency
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        public IRegistration<T> RegisterAutoWired<T>()
+        {
+            var serviceFactory = GenerateAutoWireFn<T>();
+            return this.Register(serviceFactory);
+        }
 
-		/// <summary>
-		/// Register an autowired dependency as a separate type
-		/// </summary>
-		/// <typeparam name="T"></typeparam>
-		public IRegistration<TAs> RegisterAutoWiredAs<T, TAs>()
-			where T : TAs
-		{
-			var serviceFactory = GenerateAutoWireFn<T>();
-			Func<Container, TAs> fn = c => serviceFactory(c);
-			return this.Register(fn);
-		}
+        /// <summary>
+        /// Register an autowired dependency
+        /// </summary>
+        /// <param name="name">Name of dependency</param>
+        /// <typeparam name="T"></typeparam>
+        public IRegistration<T> RegisterAutoWired<T>(string name)
+        {
+            var serviceFactory = GenerateAutoWireFn<T>();
+            return this.Register(name, serviceFactory);
+        }
 
-		/// <summary>
-		/// Alias for RegisterAutoWiredAs
-		/// </summary>
-		/// <typeparam name="T"></typeparam>
-		public IRegistration<TAs> RegisterAs<T, TAs>()
-			where T : TAs
-		{
-			return this.RegisterAutoWiredAs<T, TAs>();
-		}
+        /// <summary>
+        /// Register an autowired dependency as a separate type
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        public IRegistration<TAs> RegisterAutoWiredAs<T, TAs>()
+            where T : TAs
+        {
+            var serviceFactory = GenerateAutoWireFn<T>();
+            Func<Container, TAs> fn = c => serviceFactory(c);
+            return this.Register(fn);
+        }
 
-		/// <summary>
-		/// Auto-wires an existing instance, 
-		/// ie all public properties are tried to be resolved.
-		/// </summary>
-		/// <param name="instance"></param>
-		public void AutoWire(object instance)
-		{
-			AutoWire(this, instance);
-		}
+        /// <summary>
+        /// Register an autowired dependency as a separate type
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        public IRegistration<TAs> RegisterAutoWiredAs<T, TAs>(string name)
+            where T : TAs
+        {
+            var serviceFactory = GenerateAutoWireFn<T>();
+            Func<Container, TAs> fn = c => serviceFactory(c);
+            return this.Register(name, fn);
+        }
+
+        /// <summary>
+        /// Alias for RegisterAutoWiredAs
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        public IRegistration<TAs> RegisterAs<T, TAs>()
+            where T : TAs
+        {
+            return this.RegisterAutoWiredAs<T, TAs>();
+        }
+
+        /// <summary>
+        /// Alias for RegisterAutoWiredAs
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        public IRegistration<TAs> RegisterAs<T, TAs>(string name)
+            where T : TAs
+        {
+            return this.RegisterAutoWiredAs<T, TAs>(name);
+        }
+
+        /// <summary>
+        /// Auto-wires an existing instance, 
+        /// ie all public properties are tried to be resolved.
+        /// </summary>
+        /// <param name="instance"></param>
+        public void AutoWire(object instance)
+        {
+            AutoWire(this, instance);
+        }
 
         public object GetLazyResolver(params Type[] types) // returns Func<type>
         {
             var tryResolveGeneric = typeof(Container).GetMethods()
-                .First(x => x.Name == "ReverseLazyResolve" 
-                    && x.GetGenericArguments().Length == types.Length 
+                .First(x => x.Name == "ReverseLazyResolve"
+                    && x.GetGenericArguments().Length == types.Length
                     && x.GetParameters().Length == 0);
 
             var tryResolveMethod = tryResolveGeneric.MakeGenericMethod(types);
-            var instance = tryResolveMethod.Invoke(this, new object[0]);
+            var instance = tryResolveMethod.Invoke(this, TypeConstants.EmptyObjectArray);
             return instance;
         }
 
@@ -93,7 +127,7 @@ namespace Funq
 
         public bool Exists<TService>()
         {
-            var entry = GetEntry<TService, Func<Container, TService>>(null, throwIfMissing:false);
+            var entry = GetEntry<TService, Func<Container, TService>>(null, throwIfMissing: false);
             return entry != null;
         }
 
@@ -101,7 +135,7 @@ namespace Funq
 
         private static MethodInfo GetResolveMethod(Type typeWithResolveMethod, Type serviceType)
         {
-            var methodInfo = typeWithResolveMethod.GetMethod("Resolve", new Type[0]);
+            var methodInfo = typeWithResolveMethod.GetMethod("Resolve", TypeConstants.EmptyTypeArray);
             return methodInfo.MakeGenericMethod(new[] { serviceType });
         }
 
@@ -115,7 +149,7 @@ namespace Funq
         public static HashSet<string> IgnorePropertyTypeFullNames = new HashSet<string>
         {
             "System.Web.Mvc.ViewDataDictionary", //overrides ViewBag set in Controller constructor
-        }; 
+        };
 
         private static bool IsPublicWritableUserPropertyType(PropertyInfo pi)
         {
@@ -134,7 +168,7 @@ namespace Funq
         public static Func<Container, TService> GenerateAutoWireFn<TService>()
         {
             var lambdaParam = Expression.Parameter(typeof(Container), "container");
-            var propertyResolveFn = typeof(Container).GetMethod("TryResolve", new Type[0]);
+            var propertyResolveFn = typeof(Container).GetMethod("TryResolve", TypeConstants.EmptyTypeArray);
             var memberBindings = typeof(TService).GetPublicProperties()
                 .Where(IsPublicWritableUserPropertyType)
                 .Select(x =>
@@ -145,12 +179,12 @@ namespace Funq
                     )
                 ).ToArray();
 
-            var ctorResolveFn = typeof(Container).GetMethod("Resolve", new Type[0]);
+            var ctorResolveFn = typeof(Container).GetMethod("Resolve", TypeConstants.EmptyTypeArray);
             return Expression.Lambda<Func<Container, TService>>
                 (
                     Expression.MemberInit
                     (
-                        ConstrcutorExpression(ctorResolveFn, typeof(TService), lambdaParam),
+                        ConstructorExpression(ctorResolveFn, typeof(TService), lambdaParam),
                         memberBindings
                     ),
                     lambdaParam
@@ -166,7 +200,7 @@ namespace Funq
         public void AutoWire(Container container, object instance)
         {
             var instanceType = instance.GetType();
-            var propertyResolveFn = typeof(Container).GetMethod("TryResolve", new Type[0]);
+            var propertyResolveFn = typeof(Container).GetMethod("TryResolve", TypeConstants.EmptyTypeArray);
 
             Action<object>[] setters;
             if (!autoWireCache.TryGetValue(instanceType, out setters))
@@ -191,7 +225,7 @@ namespace Funq
                 setter(instance);
         }
 
-	    private static Action<object> GenerateAutoWireFnForProperty(
+        private static Action<object> GenerateAutoWireFnForProperty(
             Container container, MethodInfo propertyResolveFn, PropertyInfo property, Type instanceType)
         {
             var instanceParam = Expression.Parameter(typeof(object), "instance");
@@ -220,10 +254,12 @@ namespace Funq
             };
         }
 
-        private static NewExpression ConstrcutorExpression(
+        private static NewExpression ConstructorExpression(
             MethodInfo resolveMethodInfo, Type type, Expression lambdaParam)
         {
             var ctorWithMostParameters = GetConstructorWithMostParams(type);
+            if (ctorWithMostParameters == null)
+                throw new Exception(ErrorMessages.ConstructorNotFoundForType.Fmt(type.Name));
 
             var constructorParameterInfos = ctorWithMostParameters.GetParameters();
             var regParams = constructorParameterInfos
@@ -238,6 +274,17 @@ namespace Funq
             var method = resolveFn.MakeGenericMethod(resolveType);
             return Expression.Call(containerParam, method);
         }
-    }
 
+        public object TryResolve(Type type)
+        {
+            var mi = typeof(Container).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .First(x => x.Name == "TryResolve" &&
+                       x.GetGenericArguments().Length == 1 &&
+                       x.GetParameters().Length == 0);
+
+            var genericMi = mi.MakeGenericMethod(type);
+            var instance = genericMi.Invoke(this, TypeConstants.EmptyObjectArray);
+            return instance;
+        }
+    }
 }

@@ -8,6 +8,7 @@ using System.Net;
 using System.Web;
 using Funq;
 using ServiceStack.Logging;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack.Host.AspNet
@@ -34,7 +35,7 @@ namespace ServiceStack.Host.AspNet
             this.request = httpContext.Request;
             try
             {
-                this.response = new AspNetResponse(httpContext.Response);
+                this.response = new AspNetResponse(httpContext.Response, this);
             }
             catch (Exception ex)
             {
@@ -42,6 +43,16 @@ namespace ServiceStack.Host.AspNet
             }
 
             this.RequestPreferences = new RequestPreferences(httpContext);
+
+            if (httpContext.Items != null && httpContext.Items.Count > 0)
+            {
+                foreach (var key in httpContext.Items.Keys)
+                {
+                    var strKey = key as string;
+                    if (strKey == null) continue;
+                    Items[strKey] = httpContext.Items[key];
+                }
+            }
         }
 
         public HttpRequestBase HttpRequest
@@ -216,9 +227,9 @@ namespace ServiceStack.Host.AspNet
 
         public string GetRawBody()
         {
-            if (bufferedStream != null)
+            if (BufferedStream != null)
             {
-                return bufferedStream.ToArray().FromUtf8Bytes();
+                return BufferedStream.ToArray().FromUtf8Bytes();
             }
 
             using (var reader = new StreamReader(InputStream))
@@ -255,7 +266,17 @@ namespace ServiceStack.Host.AspNet
 
         public string UserHostAddress
         {
-            get { return request.UserHostAddress; }
+            get
+            {
+                try
+                {
+                    return request.UserHostAddress;
+                }
+                catch (Exception)
+                {
+                    return null; //Can throw in Mono FastCGI Host
+                }
+            }
         }
 
         public string XForwardedFor
@@ -290,12 +311,28 @@ namespace ServiceStack.Host.AspNet
             }
         }
 
+        public string Accept
+        {
+            get
+            {
+                return string.IsNullOrEmpty(request.Headers[HttpHeaders.Accept]) ? null : request.Headers[HttpHeaders.Accept];
+            }
+        }
+
         private string remoteIp;
         public string RemoteIp
         {
             get
             {
                 return remoteIp ?? (remoteIp = XForwardedFor ?? (XRealIp ?? request.UserHostAddress));
+            }
+        }
+
+        public string Authorization
+        {
+            get
+            {
+                return string.IsNullOrEmpty(request.Headers[HttpHeaders.Authorization]) ? null : request.Headers[HttpHeaders.Authorization];
             }
         }
 
@@ -321,19 +358,19 @@ namespace ServiceStack.Host.AspNet
 
         public bool UseBufferedStream
         {
-            get { return bufferedStream != null; }
+            get { return BufferedStream != null; }
             set
             {
-                bufferedStream = value
-                    ? bufferedStream ?? new MemoryStream(request.InputStream.ReadFully())
+                BufferedStream = value
+                    ? BufferedStream ?? new MemoryStream(request.InputStream.ReadFully())
                     : null;
             }
         }
 
-        private MemoryStream bufferedStream;
+        public MemoryStream BufferedStream { get; set; }
         public Stream InputStream
         {
-            get { return bufferedStream ?? request.InputStream; }
+            get { return BufferedStream ?? request.InputStream; }
         }
 
         public long ContentLength
@@ -349,12 +386,12 @@ namespace ServiceStack.Host.AspNet
                 if (httpFiles == null)
                 {
                     httpFiles = new IHttpFile[request.Files.Count];
-                    for (var i = 0; i < request.Files.Count; i++)
+                    for (int i = 0; i < request.Files.Count; i++)
                     {
                         var reqFile = request.Files[i];
-
                         httpFiles[i] = new HttpFile
                         {
+                            Name = request.Files.AllKeys[i],
                             ContentType = reqFile.ContentType,
                             ContentLength = reqFile.ContentLength,
                             FileName = reqFile.FileName,

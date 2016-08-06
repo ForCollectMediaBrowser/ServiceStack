@@ -289,23 +289,23 @@ namespace ServiceStack.ServiceHost.Tests
                         "/content/wildcard/slug/path/literal",
                         "*/content",
                         new SlugRequest { Slug = "wildcard/slug/path" },
-                        7901);
+                        97901);
 
             AssertMatch("/content/{Slug*}/version/{Version}",
                         "/content/wildcard/slug/path/version/1",
                         "*/content",
                         new SlugRequest { Slug = "wildcard/slug/path", Version = 1 },
-                        7801);
+                        97801);
 
             AssertMatch("/content/{Slug*}/with/{Options*}",
                         "/content/wildcard/slug/path/with/optionA/optionB",
                         "*/content",
                         new SlugRequest { Slug = "wildcard/slug/path", Options = "optionA/optionB" },
-                        5801);
+                        95801);
 
-            AssertMatch("/{Slug*}/content", "/content", "*/content", new SlugRequest(), 10901);
+            AssertMatch("/{Slug*}/content", "/content", "*/content", new SlugRequest(), 100901);
 
-            AssertMatch("/content/{Slug*}/literal", "/content/literal", "*/content", new SlugRequest(), 10901);
+            AssertMatch("/content/{Slug*}/literal", "/content/literal", "*/content", new SlugRequest(), 100901);
 
             AssertNoMatch("/content/{Slug*}/literal", "/content/wildcard/slug/path");
 
@@ -438,7 +438,7 @@ namespace ServiceStack.ServiceHost.Tests
                 new SlugRoute("ANY /content/literal-before/{Version}"),
 
                 new SlugRoute("GET /content/v1/literal/slug"),
-                new SlugRoute("ANY /content/v1/literal/slug"),                
+                new SlugRoute("ANY /content/v1/literal/slug"),
                 new SlugRoute("GET /content/v1/literal/{ignore}"),
                 new SlugRoute("GET /content/{ignore}/literal/{ignore}"),
                 new SlugRoute("GET /content/{Version*}/literal/{Slug*}"),
@@ -490,7 +490,7 @@ namespace ServiceStack.ServiceHost.Tests
         [Test]
         public void Can_match_lowercase_http_method()
         {
-            var restPath = new RestPath(typeof (ComplexType), "/Complex/{Id}/{Name}/Unique/{UniqueId}", "PUT");
+            var restPath = new RestPath(typeof(ComplexType), "/Complex/{Id}/{Name}/Unique/{UniqueId}", "PUT");
             var withPathInfoParts = RestPath.GetPathPartsForMatching("/complex/5/Is Alive/unique/4583B364-BBDC-427F-A289-C2923DEBD547");
             Assert.That(restPath.IsMatch("put", withPathInfoParts));
         }

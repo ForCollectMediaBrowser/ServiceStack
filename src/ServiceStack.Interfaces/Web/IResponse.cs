@@ -1,6 +1,7 @@
 //Copyright (c) Service Stack LLC. All Rights Reserved.
 //License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
 
+using System.Collections.Generic;
 using System.IO;
 
 namespace ServiceStack.Web
@@ -15,6 +16,8 @@ namespace ServiceStack.Web
         /// </summary>
         object OriginalResponse { get; }
 
+        IRequest Request { get; }
+
         int StatusCode { get; set; }
 
         string StatusDescription { get; set; }
@@ -22,6 +25,8 @@ namespace ServiceStack.Web
         string ContentType { get; set; }
 
         void AddHeader(string name, string value);
+
+        string GetHeader(string name);
 
         void Redirect(string url);
 
@@ -68,5 +73,8 @@ namespace ServiceStack.Web
         void SetContentLength(long contentLength);
 
         bool KeepAlive { get; set; }
+
+        //Add Metadata to Response
+        Dictionary<string, object> Items { get; }
     }
 }

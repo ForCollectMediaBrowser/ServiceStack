@@ -4,14 +4,18 @@ using ServiceStack.Auth;
 using ServiceStack.Caching;
 using ServiceStack.Configuration;
 using ServiceStack.Host;
+using ServiceStack.Logging;
 using ServiceStack.Redis;
 using ServiceStack.Testing;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack
 {
     public static class ServiceExtensions
     {
+        public static ILog Log = LogManager.GetLogger(typeof(ServiceExtensions));
+
         public static IHttpResult Redirect(this IServiceBase service, string url)
         {
             return service.Redirect(url, "Moved Temporarily");
@@ -53,18 +57,24 @@ namespace ServiceStack
         /// <summary>
         /// If they don't have an ICacheClient configured use an In Memory one.
         /// </summary>
-        private static readonly MemoryCacheClient DefaultCache = new MemoryCacheClient { FlushOnDispose = true };
+        internal static readonly MemoryCacheClient DefaultCache = new MemoryCacheClient();
 
         public static ICacheClient GetCacheClient(this IResolver service)
         {
-            return service.TryResolve<ICacheClient>()
-                ?? (service.TryResolve<IRedisClientsManager>()!=null ? service.TryResolve<IRedisClientsManager>().GetCacheClient():null)
-                ?? DefaultCache;
+            var cache = service.TryResolve<ICacheClient>();
+            if (cache != null)
+                return cache;
+
+            var redisManager = service.TryResolve<IRedisClientsManager>();
+            if (redisManager != null)
+                return redisManager.GetCacheClient();
+
+            return DefaultCache;
         }
 
         public static void SaveSession(this IServiceBase service, IAuthSession session, TimeSpan? expiresIn = null)
         {
-            if (service == null) return;
+            if (service == null || session == null) return;
 
             service.Request.SaveSession(session, expiresIn);
         }
@@ -93,28 +103,24 @@ namespace ServiceStack
 
         public static void SaveSession(this IRequest httpReq, IAuthSession session, TimeSpan? expiresIn = null)
         {
-            if (httpReq == null) return;
-
-            using (var cache = httpReq.GetCacheClient())
-            {
-                var sessionKey = SessionFeature.GetSessionKey(httpReq.GetSessionId());
-                cache.CacheSet(sessionKey, session, expiresIn ?? HostContext.GetDefaultSessionExpiry());
-            }
-
-            httpReq.Items[RequestItemsSessionKey] = session;
+            HostContext.AppHost.OnSaveSession(httpReq, session, expiresIn);
         }
 
         public static void RemoveSession(this IRequest httpReq)
         {
+            RemoveSession(httpReq, httpReq.GetSessionId());
+        }
+
+        public static void RemoveSession(this IRequest httpReq, string sessionId)
+        {
             if (httpReq == null) return;
+            if (sessionId == null)
+                throw new ArgumentNullException("sessionId");
 
-            using (var cache = httpReq.GetCacheClient())
-            {
-                var sessionKey = SessionFeature.GetSessionKey(httpReq.GetSessionId());
-                cache.Remove(sessionKey);
-            }
+            var sessionKey = SessionFeature.GetSessionKey(sessionId);
+            httpReq.GetCacheClient().Remove(sessionKey);
 
-            httpReq.Items.Remove(RequestItemsSessionKey);
+            httpReq.Items.Remove(Keywords.Session);
         }
 
         public static IAuthSession GetSession(this IServiceBase service, bool reload = false)
@@ -122,40 +128,88 @@ namespace ServiceStack
             return service.Request.GetSession(reload);
         }
 
-        public const string RequestItemsSessionKey = "__session";
+        public static TUserSession SessionAs<TUserSession>(this IRequest req)
+        {
+            if (HostContext.TestMode)
+            {
+                var mockSession = req.TryResolve<TUserSession>();
+                if (!Equals(mockSession, default(TUserSession)))
+                    mockSession = req.TryResolve<IAuthSession>() is TUserSession
+                        ? (TUserSession)req.TryResolve<IAuthSession>()
+                        : default(TUserSession);
+
+                if (!Equals(mockSession, default(TUserSession)))
+                    return mockSession;
+            }
+
+            return SessionFeature.GetOrCreateSession<TUserSession>(req.GetCacheClient(), req, req.Response);
+        }
+
         public static IAuthSession GetSession(this IRequest httpReq, bool reload = false)
         {
-            if (httpReq == null) return null;
+            if (httpReq == null)
+                return null;
+
+            if (HostContext.TestMode)
+            {
+                var mockSession = httpReq.TryResolve<IAuthSession>(); //testing
+                if (mockSession != null)
+                    return mockSession;
+            }
 
             object oSession = null;
             if (!reload)
-                httpReq.Items.TryGetValue(RequestItemsSessionKey, out oSession);
+                httpReq.Items.TryGetValue(Keywords.Session, out oSession);
 
-            if (oSession != null)
-                return (IAuthSession)oSession;
-
-            using (var cache = httpReq.GetCacheClient())
+            if (oSession == null && !httpReq.Items.ContainsKey(Keywords.HasPreAuthenticated))
             {
-                var sessionId = httpReq.GetSessionId();
-                var session = cache.Get<IAuthSession>(SessionFeature.GetSessionKey(sessionId));
-                if (session == null)
+                try
                 {
-                    session = AuthenticateService.CurrentSessionFactory();
-                    session.Id = sessionId;
-                    session.CreatedAt = session.LastModified = DateTime.UtcNow;
-                    session.OnCreated(httpReq);
-
-                    var authEvents = HostContext.TryResolve<IAuthEvents>();
-                    if (authEvents != null) 
-                        authEvents.OnCreated(httpReq, session);
+                    HostContext.AppHost.ApplyPreAuthenticateFilters(httpReq, httpReq.Response);
+                    httpReq.Items.TryGetValue(Keywords.Session, out oSession);
                 }
-
-                if (httpReq.Items.ContainsKey(RequestItemsSessionKey))
-                    httpReq.Items.Remove(RequestItemsSessionKey);
-
-                httpReq.Items.Add(RequestItemsSessionKey, session);
-                return session;
+                catch (Exception ex)
+                {
+                    Log.Error("Error in GetSession() when ApplyPreAuthenticateFilters", ex);
+                    /*treat errors as non-existing session*/
+                }
             }
+
+            var sessionId = httpReq.GetSessionId();
+            var session = oSession as IAuthSession;
+            if (session != null)
+                session = HostContext.AppHost.OnSessionFilter(session, sessionId);
+            if (session != null)
+                return session;
+
+            var sessionKey = SessionFeature.GetSessionKey(sessionId);
+            if (sessionKey != null)
+            {
+                session = httpReq.GetCacheClient().Get<IAuthSession>(sessionKey);
+
+                if (session != null)
+                    session = HostContext.AppHost.OnSessionFilter(session, sessionId);
+            }
+
+            if (session == null)
+            {
+                var newSession = SessionFeature.CreateNewSession(httpReq, sessionId);
+                session = HostContext.AppHost.OnSessionFilter(newSession, sessionId) ?? newSession;
+            }
+
+            httpReq.Items[Keywords.Session] = session;
+            return session;
+        }
+
+        public static TimeSpan? GetSessionTimeToLive(this ICacheClient cache, string sessionId)
+        {
+            var sessionKey = SessionFeature.GetSessionKey(sessionId);
+            return cache.GetTimeToLive(sessionKey);
+        }
+
+        public static TimeSpan? GetSessionTimeToLive(this IRequest httpReq)
+        {
+            return httpReq.GetCacheClient().GetSessionTimeToLive(httpReq.GetSessionId());
         }
 
         public static object RunAction<TService, TRequest>(
@@ -165,8 +219,8 @@ namespace ServiceStack
         {
             var actionCtx = new ActionContext
             {
-                RequestFilters = new IHasRequestFilter[0],
-                ResponseFilters = new IHasResponseFilter[0],
+                RequestFilters = TypeConstants<IHasRequestFilter>.EmptyArray,
+                ResponseFilters = TypeConstants<IHasResponseFilter>.EmptyArray,
                 ServiceType = typeof(TService),
                 RequestType = typeof(TRequest),
                 ServiceAction = (instance, req) => invokeAction(service, request)

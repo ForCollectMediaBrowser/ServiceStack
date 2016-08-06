@@ -11,7 +11,7 @@ namespace ServiceStack.Messaging
         : IMessageService, IMessageHandlerDisposer
     {
         private bool isRunning;
-        public const int DefaultRetryCount = 1; //Will be a total of 2 attempts
+        public const int DefaultRetryCount = 2; //Will be a total of 3 attempts
 
         public int RetryCount { get; set; }
         public TimeSpan? RequestTimeOut { get; protected set; }
@@ -42,7 +42,7 @@ namespace ServiceStack.Messaging
         }
 
         public void RegisterHandler<T>(Func<IMessage<T>, object> processMessageFn,
-            Action<IMessage<T>, Exception> processExceptionEx)
+            Action<IMessageHandler, IMessage<T>, Exception> processExceptionEx)
         {
             if (handlerMap.ContainsKey(typeof(T)))
             {
@@ -71,19 +71,20 @@ namespace ServiceStack.Messaging
 
         public string GetStatsDescription()
         {
-            var sb = new StringBuilder("#MQ HOST STATS:\n");
+            var sb = StringBuilderCache.Allocate();
+            sb.Append("#MQ HOST STATS:\n");
             sb.AppendLine("===============");
             foreach (var messageHandler in messageHandlers)
             {
                 sb.AppendLine(messageHandler.GetStats().ToString());
                 sb.AppendLine("---------------");
             }
-            return sb.ToString();
+            return StringBuilderCache.ReturnAndFree(sb);
         }
 
         protected IMessageHandlerFactory CreateMessageHandlerFactory<T>(
-            Func<IMessage<T>, object> processMessageFn, 
-            Action<IMessage<T>, Exception> processExceptionEx)
+            Func<IMessage<T>, object> processMessageFn,
+            Action<IMessageHandler, IMessage<T>, Exception> processExceptionEx)
         {
             return new MessageHandlerFactory<T>(this, processMessageFn, processExceptionEx) {
                 RetryCount = RetryCount,

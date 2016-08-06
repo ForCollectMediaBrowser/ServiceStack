@@ -58,10 +58,11 @@ namespace ServiceStack.Common.Tests.OAuth
                 requestContext.ResponseContentType = contentType;
             }
             var userAuthRepository = authRepo ?? GetStubRepo();
+            HostContext.Container.Register<IAuthRepository>(userAuthRepository);
+
             var service = new RegisterService
             {
-                RegistrationValidator = validator ?? new RegistrationValidator { UserAuthRepo = userAuthRepository },
-                AuthRepo = userAuthRepository,
+                RegistrationValidator = validator ?? new RegistrationValidator(),
                 Request = requestContext,
             };
 
@@ -148,11 +149,11 @@ namespace ServiceStack.Common.Tests.OAuth
             mock.Expect(x => x.GetUserAuthByUserName(It.IsAny<string>()))
                 .Returns(() => mockExistingUser);
             var mockUserAuth = mock.Object;
+            appHost.Register<IAuthRepository>(mockUserAuth);
 
             var service = new RegisterService
             {
-                RegistrationValidator = new RegistrationValidator { UserAuthRepo = mockUserAuth },
-                AuthRepo = mockUserAuth,
+                RegistrationValidator = new RegistrationValidator(),
             };
 
             var request = new Register

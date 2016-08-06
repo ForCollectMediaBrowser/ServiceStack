@@ -7,7 +7,7 @@ using ServiceStack.Web;
 namespace ServiceStack
 {
     public class JsonServiceClient
-        : ServiceClientBase
+        : ServiceClientBase, IJsonServiceClient
     {
         public override string Format
         {
@@ -30,7 +30,7 @@ namespace ServiceStack
 
         public override string ContentType
         {
-            get { return String.Format("application/{0}", Format); }
+            get { return string.Format("application/{0}", Format); }
         }
 
         public override void SerializeToStream(IRequest requestContext, object request, Stream stream)
@@ -46,6 +46,23 @@ namespace ServiceStack
         public override StreamDeserializerDelegate StreamDeserializer
         {
             get { return JsonSerializer.DeserializeFromStream; }
+        }
+
+        internal static JsonObject ParseObject(string json)
+        {
+            return JsonObject.Parse(json);
+        }
+
+        [Obsolete("No longer required, use json.FromJson<T>()")]
+        public static T FromJson<T>(string json)
+        {
+            return json.FromJson<T>();
+        }
+
+        [Obsolete("No longer required, use obj.ToJson()")]
+        public static string ToJson<T>(T o)
+        {
+            return o.ToJson();
         }
     }
 }

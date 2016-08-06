@@ -36,7 +36,6 @@ namespace ServiceStack.Redis.Pipeline
         void QueueCommand(Func<IRedisClient, byte[][]> command, Action<byte[][]> onSuccessCallback);
         void QueueCommand(Func<IRedisClient, byte[][]> command, Action<byte[][]> onSuccessCallback, Action<Exception> onErrorCallback);
 
-
         void QueueCommand(Func<IRedisClient, string> command);
         void QueueCommand(Func<IRedisClient, string> command, Action<string> onSuccessCallback);
         void QueueCommand(Func<IRedisClient, string> command, Action<string> onSuccessCallback, Action<Exception> onErrorCallback);
@@ -45,5 +44,20 @@ namespace ServiceStack.Redis.Pipeline
         void QueueCommand(Func<IRedisClient, List<string>> command, Action<List<string>> onSuccessCallback);
         void QueueCommand(Func<IRedisClient, List<string>> command, Action<List<string>> onSuccessCallback, Action<Exception> onErrorCallback);
 
+        void QueueCommand(Func<IRedisClient, HashSet<string>> command);
+        void QueueCommand(Func<IRedisClient, HashSet<string>> command, Action<HashSet<string>> onSuccessCallback);
+        void QueueCommand(Func<IRedisClient, HashSet<string>> command, Action<HashSet<string>> onSuccessCallback, Action<Exception> onErrorCallback);
+
+        void QueueCommand(Func<IRedisClient, Dictionary<string,string>> command);
+        void QueueCommand(Func<IRedisClient, Dictionary<string,string>> command, Action<Dictionary<string,string>> onSuccessCallback);
+        void QueueCommand(Func<IRedisClient, Dictionary<string,string>> command, Action<Dictionary<string,string>> onSuccessCallback, Action<Exception> onErrorCallback);
+
+        void QueueCommand(Func<IRedisClient, RedisData> command);
+        void QueueCommand(Func<IRedisClient, RedisData> command, Action<RedisData> onSuccessCallback);
+        void QueueCommand(Func<IRedisClient, RedisData> command, Action<RedisData> onSuccessCallback, Action<Exception> onErrorCallback);
+
+        void QueueCommand(Func<IRedisClient, RedisText> command);
+        void QueueCommand(Func<IRedisClient, RedisText> command, Action<RedisText> onSuccessCallback);
+        void QueueCommand(Func<IRedisClient, RedisText> command, Action<RedisText> onSuccessCallback, Action<Exception> onErrorCallback);
     }
 }

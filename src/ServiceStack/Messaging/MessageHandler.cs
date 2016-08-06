@@ -18,7 +18,7 @@ namespace ServiceStack.Messaging
         public const int DefaultRetryCount = 2; //Will be a total of 3 attempts
         private readonly IMessageService messageService;
         private readonly Func<IMessage<T>, object> processMessageFn;
-        private readonly Action<IMessage<T>, Exception> processInExceptionFn;
+        private readonly Action<IMessageHandler, IMessage<T>, Exception> processInExceptionFn;
         public Func<string, IOneWayClient> ReplyClientFactory { get; set; }
         public string[] PublishResponsesWhitelist { get; set; }
         private readonly int retryCount;
@@ -37,11 +37,11 @@ namespace ServiceStack.Messaging
             Func<IMessage<T>, object> processMessageFn)
             : this(messageService, processMessageFn, null, DefaultRetryCount) { }
 
-        private IMessageQueueClient MqClient { get; set; }
+        public IMessageQueueClient MqClient { get; private set; }
 
         public MessageHandler(IMessageService messageService,
             Func<IMessage<T>, object> processMessageFn,
-            Action<IMessage<T>, Exception> processInExceptionFn,
+            Action<IMessageHandler, IMessage<T>, Exception> processInExceptionFn,
             int retryCount)
         {
             if (messageService == null)
@@ -102,7 +102,7 @@ namespace ServiceStack.Messaging
                 TotalNormalMessagesReceived, TotalPriorityMessagesReceived, LastMessageProcessed);
         }
 
-        private void DefaultInExceptionHandler(IMessage<T> message, Exception ex)
+        private void DefaultInExceptionHandler(IMessageHandler mqHandler, IMessage<T> message, Exception ex)
         {
             Log.Error("Message exception handler threw an error", ex);
 
@@ -116,7 +116,7 @@ namespace ServiceStack.Messaging
             }
 
             message.Error = ex.ToResponseStatus();
-            MqClient.Nak(message, requeue: requeue, exception:ex);
+            mqHandler.MqClient.Nak(message, requeue: requeue, exception: ex);
         }
 
         public void ProcessMessage(IMessageQueueClient mqClient, object mqResponse)
@@ -165,7 +165,7 @@ namespace ServiceStack.Messaging
                     }
 
                     msgHandled = true;
-                    processInExceptionFn(message, responseEx);
+                    processInExceptionFn(this, message, responseEx);
                     return;
                 }
 
@@ -174,15 +174,26 @@ namespace ServiceStack.Messaging
                 //If there's no response publish the request message to its OutQ
                 if (response == null)
                 {
-                    var messageOptions = (MessageOption) message.Options;
-                    if (messageOptions.Has(MessageOption.NotifyOneWay))
+                    if (message.ReplyTo != null)
                     {
-                        mqClient.Notify(QueueNames<T>.Out, message);
+                        response = message.GetBody();
+                    }
+                    else
+                    {
+                        var messageOptions = (MessageOption) message.Options;
+                        if (messageOptions.Has(MessageOption.NotifyOneWay))
+                        {
+                            mqClient.Notify(QueueNames<T>.Out, message);
+                        }
                     }
                 }
-                else
+                
+                if (response != null)
                 {
-                    var responseType = response.GetType();
+                    var responseMessage = response as IMessage;
+                    var responseType = responseMessage != null 
+                        ? (responseMessage.Body != null ? responseMessage.Body.GetType() : typeof(object))
+                        : response.GetType();
 
                     //If there's no explicit ReplyTo, send it to the typed Response InQ by default
                     var mqReplyTo = message.ReplyTo;
@@ -223,7 +234,9 @@ namespace ServiceStack.Messaging
                     }
 
                     //Otherwise send to our trusty response Queue (inc if replyClient fails)
-                    var responseMessage = MessageFactory.Create(response);
+                    if (responseMessage == null)
+                        responseMessage = MessageFactory.Create(response);
+
                     responseMessage.ReplyId = message.Id;
                     mqClient.Publish(mqReplyTo, responseMessage);
                 }
@@ -234,7 +247,7 @@ namespace ServiceStack.Messaging
                 {
                     TotalMessagesFailed++;
                     msgHandled = true;
-                    processInExceptionFn(message, ex);
+                    processInExceptionFn(this, message, ex);
                 }
                 catch (Exception exHandlerEx)
                 {

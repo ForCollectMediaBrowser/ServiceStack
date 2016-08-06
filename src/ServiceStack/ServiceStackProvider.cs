@@ -29,18 +29,27 @@ namespace ServiceStack
         ICacheClient Cache { get; }
         IDbConnection Db { get; }
         IRedisClient Redis { get; }
-        IMessageFactory MessageFactory { get; set; }
         IMessageProducer MessageProducer { get; }
         ISessionFactory SessionFactory { get; }
         ISession SessionBag { get; }
         bool IsAuthenticated { get; }
-        T TryResolve<T>();
-        T ResolveService<T>();
-        object Execute(object requestDto);
-        object Execute(IRequest request);
         IAuthSession GetSession(bool reload = false);
         TUserSession SessionAs<TUserSession>();
         void ClearSession();
+        T TryResolve<T>();
+        T ResolveService<T>();
+
+        IServiceGateway Gateway { get; }
+
+        object Execute(IRequest request);
+
+        [Obsolete("Use Gateway")]
+        object Execute(object requestDto);
+
+        [Obsolete("Use Gateway")]
+        TResponse Execute<TResponse>(IReturn<TResponse> requestDto);
+
+        [Obsolete("Use Gateway")]
         void PublishMessage<T>(T message);
     }
 
@@ -71,24 +80,27 @@ namespace ServiceStack
                 return false;
 
             var httpReq = hasProvider.ServiceStackProvider.Request;
-            var userAuthRepo = httpReq.TryResolve<IAuthRepository>();
-            var hasRoles = roleAttrs.All(x => x.HasAllRoles(httpReq, authSession, userAuthRepo));
-            if (!hasRoles)
-                return false;
+            var userAuthRepo = HostContext.AppHost.GetAuthRepository(hasProvider.ServiceStackProvider.Request);
+            using (userAuthRepo as IDisposable)
+            {
+                var hasRoles = roleAttrs.All(x => x.HasAllRoles(httpReq, authSession, userAuthRepo));
+                if (!hasRoles)
+                    return false;
 
-            var hasAnyRole = anyRoleAttrs.All(x => x.HasAnyRoles(httpReq, authSession, userAuthRepo));
-            if (!hasAnyRole)
-                return false;
+                var hasAnyRole = anyRoleAttrs.All(x => x.HasAnyRoles(httpReq, authSession, userAuthRepo));
+                if (!hasAnyRole)
+                    return false;
 
-            var hasPermssions = permAttrs.All(x => x.HasAllPermissions(httpReq, authSession, userAuthRepo));
-            if (!hasPermssions)
-                return false;
+                var hasPermssions = permAttrs.All(x => x.HasAllPermissions(httpReq, authSession, userAuthRepo));
+                if (!hasPermssions)
+                    return false;
 
-            var hasAnyPermission = anyPermAttrs.All(x => x.HasAnyPermissions(httpReq, authSession, userAuthRepo));
-            if (!hasAnyPermission)
-                return false;
+                var hasAnyPermission = anyPermAttrs.All(x => x.HasAnyPermissions(httpReq, authSession, userAuthRepo));
+                if (!hasAnyPermission)
+                    return false;
 
-            return true;
+                return true;
+            }
         }
     }
 
@@ -97,7 +109,7 @@ namespace ServiceStack
         public ServiceStackProvider(IHttpRequest request, IResolver resolver = null)
         {
             this.request = request;
-            this.resolver = resolver ?? Service.GlobalResolver ??  HostContext.AppHost;
+            this.resolver = resolver ?? Service.GlobalResolver ?? HostContext.AppHost;
         }
 
         private IResolver resolver;
@@ -137,63 +149,67 @@ namespace ServiceStack
         public virtual T ResolveService<T>()
         {
             var service = TryResolve<T>();
-            var requiresContext = service as IRequiresRequest;
-            if (requiresContext != null)
-            {
-                requiresContext.Request = Request;
-            }
-            return service;
+            return HostContext.ResolveService(Request, service);
+        }
+
+        private IServiceGateway gateway;
+        public virtual IServiceGateway Gateway
+        {
+            get { return gateway ?? (gateway = HostContext.AppHost.GetServiceGateway(Request)); }
         }
 
         public object Execute(object requestDto)
         {
-            return HostContext.ServiceController.Execute(requestDto, Request);
+            var response = HostContext.ServiceController.Execute(requestDto, Request);
+            var ex = response as Exception;
+            if (ex != null)
+                throw ex;
+
+            return response;
+        }
+
+        public TResponse Execute<TResponse>(IReturn<TResponse> requestDto)
+        {
+            return (TResponse)Execute((object)requestDto);
         }
 
         public object Execute(IRequest request)
         {
-            return HostContext.ServiceController.Execute(Request);
+            var response = HostContext.ServiceController.Execute(request, applyFilters:true);
+            var ex = response as Exception;
+            if (ex != null)
+                throw ex;
+
+            return response;
         }
 
         public object ForwardRequest()
         {
-            return HostContext.ServiceController.Execute(Request);
+            return Execute(Request);
         }
 
         private ICacheClient cache;
         public virtual ICacheClient Cache
         {
-            get
-            {
-                return cache ??
-                    (cache = TryResolve<ICacheClient>()) ??
-                    (cache = (TryResolve<IRedisClientsManager>() != null ? TryResolve<IRedisClientsManager>().GetCacheClient() : null));
-            }
+            get { return cache ?? (cache = HostContext.AppHost.GetCacheClient(Request)); }
         }
 
         private IDbConnection db;
         public virtual IDbConnection Db
         {
-            get { return db ?? (db = TryResolve<IDbConnectionFactory>().OpenDbConnection()); }
+            get { return db ?? (db = HostContext.AppHost.GetDbConnection(Request)); }
         }
 
         private IRedisClient redis;
         public virtual IRedisClient Redis
         {
-            get { return redis ?? (redis = TryResolve<IRedisClientsManager>().GetClient()); }
-        }
-
-        private IMessageFactory messageFactory;
-        public virtual IMessageFactory MessageFactory
-        {
-            get { return messageFactory ?? (messageFactory = TryResolve<IMessageFactory>()); }
-            set { messageFactory = value; }
+            get { return redis ?? (redis = HostContext.AppHost.GetRedisClient(Request)); }
         }
 
         private IMessageProducer messageProducer;
         public virtual IMessageProducer MessageProducer
         {
-            get { return messageProducer ?? (messageProducer = MessageFactory.CreateMessageProducer()); }
+            get { return messageProducer ?? (messageProducer = HostContext.AppHost.GetMessageProducer(Request)); }
         }
 
         private ISessionFactory sessionFactory;
@@ -208,10 +224,7 @@ namespace ServiceStack
         /// </summary>
         public virtual TUserSession SessionAs<TUserSession>()
         {
-            var ret = TryResolve<TUserSession>();
-            return !Equals(ret, default(TUserSession))
-                ? ret
-                : Cache.SessionAs<TUserSession>(Request, Response);
+            return SessionFeature.GetOrCreateSession<TUserSession>(Cache, Request, Response);
         }
 
         public virtual void ClearSession()

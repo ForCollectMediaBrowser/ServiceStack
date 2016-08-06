@@ -6,6 +6,7 @@ using System.Net;
 using System.Runtime.Serialization;
 using System.Web;
 using Funq;
+using ServiceStack.Caching;
 using ServiceStack.Configuration;
 using ServiceStack.Host;
 using ServiceStack.Host.HttpListener;
@@ -104,6 +105,12 @@ namespace ServiceStack
             get { return Config.DebugMode; }
         }
 
+        public static bool TestMode
+        {
+            get { return ServiceStackHost.Instance != null && ServiceStackHost.Instance.TestMode; }
+            set { ServiceStackHost.Instance.TestMode = value; }
+        }
+
         public static List<HttpHandlerResolverDelegate> CatchAllHandlers
         {
             get { return AssertAppHost().CatchAllHandlers; }
@@ -149,36 +156,53 @@ namespace ServiceStack
             return AssertAppHost().ApplyRequestFilters(httpReq, httpRes, requestDto);
         }
 
-        public static bool ApplyMessageResponseFilters(IRequest req, IResponse res, object response)
-        {
-            return AssertAppHost().ApplyMessageResponseFilters(req, res, response);
-        }
-
-        public static bool ApplyMessageRequestFilters(IRequest req, IResponse res, object requestDto)
-        {
-            return AssertAppHost().ApplyMessageRequestFilters(req, res, requestDto);
-        }
-
         public static bool ApplyResponseFilters(IRequest httpReq, IResponse httpRes, object response)
         {
             return AssertAppHost().ApplyResponseFilters(httpReq, httpRes, response);
         }
 
+        /// <summary>
+        /// Read/Write Virtual FileSystem. Defaults to FileSystemVirtualPathProvider
+        /// </summary>
+        public static IVirtualFiles VirtualFiles
+        {
+            get { return AssertAppHost().VirtualFiles; }
+        }
+
+        /// <summary>
+        /// Cascading collection of virtual file sources, inc. Embedded Resources, File System, In Memory, S3
+        /// </summary>
+        public static IVirtualPathProvider VirtualFileSources
+        {
+            get { return AssertAppHost().VirtualFileSources; }
+        }
+
+        [Obsolete("Renamed to VirtualFileSources")]
         public static IVirtualPathProvider VirtualPathProvider
         {
-            get { return AssertAppHost().VirtualPathProvider; }
+            get { return AssertAppHost().VirtualFileSources; }
+        }
+
+        public static ICacheClient Cache
+        {
+            get { return TryResolve<ICacheClient>(); }
+        }
+
+        public static MemoryCacheClient LocalCache
+        {
+            get { return TryResolve<MemoryCacheClient>(); }
         }
 
         /// <summary>
         /// Call to signal the completion of a ServiceStack-handled Request
         /// </summary>
-        internal static void CompleteRequest()
+        internal static void CompleteRequest(IRequest request)
         {
             try
             {
-                AssertAppHost().OnEndRequest();
+                AssertAppHost().OnEndRequest(request);
             }
-            catch (Exception ex) { }
+            catch (Exception) { }
         }
 
         public static IServiceRunner<TRequest> CreateServiceRunner<TRequest>(ActionContext actionContext)
@@ -196,12 +220,14 @@ namespace ServiceStack
 
         public static T GetPlugin<T>() where T : class, IPlugin
         {
-            return AssertAppHost().GetPlugin<T>();
+            var appHost = AppHost;
+            return appHost == null ? default(T) : appHost.GetPlugin<T>();
         }
 
         public static bool HasPlugin<T>() where T : class, IPlugin
         {
-            return AssertAppHost().HasPlugin<T>();
+            var appHost = AppHost;
+            return appHost != null && appHost.HasPlugin<T>();
         }
 
         public static string GetAppConfigPath()
@@ -239,7 +265,7 @@ namespace ServiceStack
                 "Request with '{0}' is not allowed".Fmt(requestAttrs));
         }
 
-        public static string ResolveLocalizedString(string text, IRequest request=null)
+        public static string ResolveLocalizedString(string text, IRequest request = null)
         {
             return AssertAppHost().ResolveLocalizedString(text, request);
         }
@@ -305,13 +331,6 @@ namespace ServiceStack
             return null;
         }
 
-        public static TimeSpan GetDefaultSessionExpiry()
-        {
-            return ServiceStackHost.Instance == null 
-                ? SessionFeature.DefaultSessionExpiry 
-                : ServiceStackHost.Instance.GetDefaultSessionExpiry();
-        }
-
         public static object RaiseServiceException(IRequest httpReq, object request, Exception ex)
         {
             return AssertAppHost().OnServiceException(httpReq, request, ex);
@@ -322,15 +341,23 @@ namespace ServiceStack
             AssertAppHost().OnUncaughtException(httpReq, httpRes, operationName, ex);
         }
 
+        public static void RaiseAndHandleUncaughtException(IRequest httpReq, IResponse httpRes, string operationName, Exception ex)
+        {
+            AssertAppHost().OnUncaughtException(httpReq, httpRes, operationName, ex);
+
+            if (httpRes.IsClosed)
+                return;
+
+            AssertAppHost().HandleUncaughtException(httpReq, httpRes, operationName, ex);
+        }
+
         /// <summary>
         /// Resolves and auto-wires a ServiceStack Service from a ASP.NET HttpContext.
         /// </summary>
-        public static T ResolveService<T>(HttpContextBase httpCtx=null) where T : class, IRequiresRequest
+        public static T ResolveService<T>(HttpContextBase httpCtx = null) where T : class, IRequiresRequest
         {
-            var service = AssertAppHost().Container.Resolve<T>();
-            if (service == null) return null;
-            service.Request = httpCtx != null ? httpCtx.ToRequest() : HttpContext.Current.ToRequest();
-            return service;
+            var httpReq = httpCtx != null ? httpCtx.ToRequest() : GetCurrentRequest();
+            return ResolveService(httpReq, AssertAppHost().Container.Resolve<T>());
         }
 
         /// <summary>
@@ -338,20 +365,25 @@ namespace ServiceStack
         /// </summary>
         public static T ResolveService<T>(HttpListenerContext httpCtx) where T : class, IRequiresRequest
         {
-            var service = AssertAppHost().Container.Resolve<T>();
-            if (service == null) return null;
-            service.Request = httpCtx.ToRequest();
-            return service;
+            return ResolveService(httpCtx.ToRequest(), AssertAppHost().Container.Resolve<T>());
         }
 
         /// <summary>
         /// Resolves and auto-wires a ServiceStack Service.
         /// </summary>
-        public static T ResolveService<T>(IHttpRequest httpReq) where T : class, IRequiresRequest
+        public static T ResolveService<T>(IRequest httpReq) where T : class, IRequiresRequest
         {
-            var service = AssertAppHost().Container.Resolve<T>();
-            if (service == null) return null;
-            service.Request = httpReq;
+            return ResolveService(httpReq, AssertAppHost().Container.Resolve<T>());
+        }
+
+        public static T ResolveService<T>(IRequest httpReq, T service)
+        {
+            var hasRequest = service as IRequiresRequest;
+            if (hasRequest != null)
+            {
+                httpReq.SetInProcessRequest();
+                hasRequest.Request = httpReq;
+            }
             return service;
         }
 
@@ -368,6 +400,38 @@ namespace ServiceStack
         public static void OnExceptionTypeFilter(Exception exception, ResponseStatus responseStatus)
         {
             AssertAppHost().OnExceptionTypeFilter(exception, responseStatus);
+        }
+
+        public static IRequest GetCurrentRequest()
+        {
+            var req = AssertAppHost().TryGetCurrentRequest();
+            if (req == null)
+                throw new NotImplementedException(ErrorMessages.HostDoesNotSupportSingletonRequest);
+
+            return req;
+        }
+
+        public static IRequest TryGetCurrentRequest()
+        {
+            return AssertAppHost().TryGetCurrentRequest();
+        }
+
+        public static int FindFreeTcpPort(int startingFrom=5000, int endingAt=65535)
+        {
+            var tcpEndPoints = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            var activePorts = new HashSet<int>();
+            foreach (var endPoint in tcpEndPoints)
+            {
+                activePorts.Add(endPoint.Port);
+            }
+
+            for (var port = startingFrom; port < endingAt; port++)
+            {
+                if (!activePorts.Contains(port))
+                    return port;
+            }
+
+            return -1;
         }
     }
 }
