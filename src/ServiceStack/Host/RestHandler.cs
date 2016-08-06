@@ -154,11 +154,9 @@ namespace ServiceStack.Host
             }
         }
 
-        public static object CreateRequest(IRequest httpReq, IRestPath restPath, Dictionary<string, string> requestParams, bool createContentTypeRequest = true)
+        public static object CreateRequest(IRequest httpReq, IRestPath restPath, Dictionary<string, string> requestParams)
         {
-            var requestDto = createContentTypeRequest ? 
-                CreateContentTypeRequest(httpReq, restPath.RequestType, httpReq.ContentType) :
-                null;
+            var requestDto = CreateContentTypeRequest(httpReq, restPath.RequestType, httpReq.ContentType);
 
             return CreateRequest(httpReq, restPath, requestParams, requestDto);
         }
