@@ -16,16 +16,29 @@ using ServiceStack.Web;
 
 namespace ServiceStack
 {
+    public interface IAsyncStreamWriter
+    {
+        Task WriteToAsync(Stream responseStream);
+    }
     public static class HttpResponseExtensionsInternal
     {
         private static readonly ILog Log = LogManager.GetLogger(typeof(HttpResponseExtensionsInternal));
 
-        public static bool WriteToOutputStream(IResponse response, object result, byte[] bodyPrefix, byte[] bodySuffix)
+        public static async Task<bool> WriteToOutputStream(IResponse response, object result, byte[] bodyPrefix, byte[] bodySuffix)
         {
             var partialResult = result as IPartialWriter;
             if (HostContext.Config.AllowPartialResponses && partialResult != null && partialResult.IsPartialRequest)
             {
                 partialResult.WritePartialTo(response);
+                return true;
+            }
+
+            var asyncStreamWriter = result as IAsyncStreamWriter;
+            if (asyncStreamWriter != null)
+            {
+                if (bodyPrefix != null) response.OutputStream.Write(bodyPrefix, 0, bodyPrefix.Length);
+                await asyncStreamWriter.WriteToAsync(response.OutputStream).ConfigureAwait(false);
+                if (bodySuffix != null) response.OutputStream.Write(bodySuffix, 0, bodySuffix.Length);
                 return true;
             }
 
@@ -94,8 +107,7 @@ namespace ServiceStack
                 }
                 httpResult.RequestContext = httpReq;
                 httpReq.ResponseContentType = httpResult.ContentType ?? httpReq.ResponseContentType;
-                var httpResSerializer = httpResult.ResponseFilter.GetResponseSerializer(httpReq.ResponseContentType)
-                    ?? httpResult.ResponseFilter.GetResponseSerializer(HostContext.Config.DefaultContentType);
+                var httpResSerializer = httpResult.ResponseFilter.GetResponseSerializer(httpReq.ResponseContentType);
                 return httpRes.WriteToResponse(httpResult, httpResSerializer, httpReq, bodyPrefix, bodySuffix);
             }
 
@@ -119,175 +131,174 @@ namespace ServiceStack
         /// <param name="bodyPrefix">Add prefix to response body if any</param>
         /// <param name="bodySuffix">Add suffix to response body if any</param>
         /// <returns></returns>
-        public static Task<bool> WriteToResponse(this IResponse response, object result, ResponseSerializerDelegate defaultAction, IRequest request, byte[] bodyPrefix, byte[] bodySuffix)
+        public static async Task<bool> WriteToResponse(this IResponse response, object result, ResponseSerializerDelegate defaultAction, IRequest request, byte[] bodyPrefix, byte[] bodySuffix)
         {
-            using (Profiler.Current.Step("Writing to Response"))
+            var defaultContentType = request.ResponseContentType;
+            try
             {
-                var defaultContentType = request.ResponseContentType;
-                try
+                if (result == null)
                 {
-                    if (result == null)
+                    response.EndRequestWithNoContent();
+                    return true;
+                }
+
+                ApplyGlobalResponseHeaders(response);
+
+                IDisposable resultScope = null;
+
+                var httpResult = result as IHttpResult;
+                if (httpResult != null)
+                {
+                    if (httpResult.ResultScope != null)
+                        resultScope = httpResult.ResultScope();
+
+                    if (httpResult.RequestContext == null)
+                        httpResult.RequestContext = request;
+
+                    var paddingLength = bodyPrefix != null ? bodyPrefix.Length : 0;
+                    if (bodySuffix != null)
+                        paddingLength += bodySuffix.Length;
+
+                    httpResult.PaddingLength = paddingLength;
+
+                    var httpError = httpResult as IHttpError;
+                    if (httpError != null)
                     {
-                        response.EndRequestWithNoContent();
-                        return TypeConstants.TrueTask;
+                        response.Dto = httpError.CreateErrorResponse();
+                        if (response.HandleCustomErrorHandler(request,
+                            defaultContentType, httpError.Status, response.Dto))
+                        {
+                            return true;
+                        }
                     }
 
-                    ApplyGlobalResponseHeaders(response);
+                    response.Dto = response.Dto ?? httpResult.GetDto();
 
-                    IDisposable resultScope = null;
+                    response.StatusCode = httpResult.Status;
+                    response.StatusDescription = (httpResult.StatusDescription ?? httpResult.StatusCode.ToString()).Localize(request);
+                    if (string.IsNullOrEmpty(httpResult.ContentType))
+                    {
+                        httpResult.ContentType = defaultContentType;
+                    }
+                    response.ContentType = httpResult.ContentType;
 
-                    var httpResult = result as IHttpResult;
+                    if (httpResult.Cookies != null)
+                    {
+                        foreach (var cookie in httpResult.Cookies)
+                        {
+                            response.SetCookie(cookie);
+                        }
+                    }
+                }
+                else
+                {
+                    response.Dto = result;
+                }
+
+                /* Mono Error: Exception: Method not found: 'System.Web.HttpResponse.get_Headers' */
+                var responseOptions = result as IHasOptions;
+                if (responseOptions != null)
+                {
+                    //Reserving options with keys in the format 'xx.xxx' (No Http headers contain a '.' so its a safe restriction)
+                    const string reservedOptions = ".";
+
+                    foreach (var responseHeaders in responseOptions.Options)
+                    {
+                        if (responseHeaders.Key.Contains(reservedOptions)) continue;
+                        if (responseHeaders.Key == HttpHeaders.ContentLength)
+                        {
+                            response.SetContentLength(long.Parse(responseHeaders.Value));
+                            continue;
+                        }
+
+                        if (Log.IsDebugEnabled)
+                            Log.DebugFormat("Setting Custom HTTP Header: {0}: {1}", responseHeaders.Key, responseHeaders.Value);
+
+                        if (Env.IsMono && responseHeaders.Key.EqualsIgnoreCase(HttpHeaders.ContentType))
+                        {
+                            response.ContentType = responseHeaders.Value;
+                        }
+                        else
+                        {
+                            response.AddHeader(responseHeaders.Key, responseHeaders.Value);
+                        }
+                    }
+                }
+
+                //ContentType='text/html' is the default for a HttpResponse
+                //Do not override if another has been set
+                if (response.ContentType == null || response.ContentType == MimeTypes.Html)
+                {
+                    response.ContentType = defaultContentType;
+                }
+                if (bodyPrefix != null && response.ContentType.IndexOf(MimeTypes.Json, StringComparison.InvariantCultureIgnoreCase) >= 0)
+                {
+                    response.ContentType = MimeTypes.JavaScript;
+                }
+
+                if (HostContext.Config.AppendUtf8CharsetOnContentTypes.Contains(response.ContentType))
+                {
+                    response.ContentType += ContentFormat.Utf8Suffix;
+                }
+
+                using (resultScope)
+                using (HostContext.Config.AllowJsConfig ? JsConfig.CreateScope(request.QueryString[Keywords.JsConfig]) : null)
+                {
+                    var disposableResult = result as IDisposable;
+                    var writeToOutputStreamResult =
+                        await WriteToOutputStream(response, result, bodyPrefix, bodySuffix).ConfigureAwait(false);
+                    if (writeToOutputStreamResult)
+                    {
+                        response.Flush(); //required for Compression
+                        if (disposableResult != null) disposableResult.Dispose();
+                        return true;
+                    }
+
                     if (httpResult != null)
+                        result = httpResult.Response;
+
+                    var responseText = result as string;
+                    if (responseText != null)
                     {
-                        if (httpResult.ResultScope != null)
-                            resultScope = httpResult.ResultScope();
+                        if (bodyPrefix != null) response.OutputStream.Write(bodyPrefix, 0, bodyPrefix.Length);
 
-                        if (httpResult.RequestContext == null)
-                            httpResult.RequestContext = request;
+                        if (response.ContentType == null || response.ContentType == MimeTypes.Html)
+                            response.ContentType = defaultContentType;
+                        response.Write(responseText);
 
-                        var paddingLength = bodyPrefix != null ? bodyPrefix.Length : 0;
-                        if (bodySuffix != null)
-                            paddingLength += bodySuffix.Length;
-
-                        httpResult.PaddingLength = paddingLength;
-
-                        var httpError = httpResult as IHttpError;
-                        if (httpError != null)
-                        {
-                            response.Dto = httpError.CreateErrorResponse();
-                            if (response.HandleCustomErrorHandler(request,
-                                defaultContentType, httpError.Status, response.Dto))
-                            {
-                                return TypeConstants.TrueTask;
-                            }
-                        }
-
-                        response.Dto = response.Dto ?? httpResult.GetDto();
-
-                        response.StatusCode = httpResult.Status;
-                        response.StatusDescription = (httpResult.StatusDescription ?? httpResult.StatusCode.ToString()).Localize(request);
-                        if (string.IsNullOrEmpty(httpResult.ContentType))
-                        {
-                            httpResult.ContentType = defaultContentType;
-                        }
-                        response.ContentType = httpResult.ContentType;
-
-                        if (httpResult.Cookies != null)
-                        {
-                            foreach (var cookie in httpResult.Cookies)
-                            {
-                                response.SetCookie(cookie);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        response.Dto = result;
+                        if (bodySuffix != null) response.OutputStream.Write(bodySuffix, 0, bodySuffix.Length);
+                        return true;
                     }
 
-                    /* Mono Error: Exception: Method not found: 'System.Web.HttpResponse.get_Headers' */
-                    var responseOptions = result as IHasOptions;
-                    if (responseOptions != null)
+                    if (defaultAction == null)
                     {
-                        //Reserving options with keys in the format 'xx.xxx' (No Http headers contain a '.' so its a safe restriction)
-                        const string reservedOptions = ".";
-
-                        foreach (var responseHeaders in responseOptions.Options)
-                        {
-                            if (responseHeaders.Key.Contains(reservedOptions)) continue;
-                            if (responseHeaders.Key == HttpHeaders.ContentLength)
-                            {
-                                response.SetContentLength(long.Parse(responseHeaders.Value));
-                                continue;
-                            }
-
-                            if (Log.IsDebugEnabled)
-                                Log.DebugFormat("Setting Custom HTTP Header: {0}: {1}", responseHeaders.Key, responseHeaders.Value);
-
-                            if (Env.IsMono && responseHeaders.Key.EqualsIgnoreCase(HttpHeaders.ContentType))
-                            {
-                                response.ContentType = responseHeaders.Value;
-                            }
-                            else
-                            {
-                                response.AddHeader(responseHeaders.Key, responseHeaders.Value);
-                            }
-                        }
+                        throw new ArgumentNullException("defaultAction", String.Format(
+                            "As result '{0}' is not a supported responseType, a defaultAction must be supplied",
+                            (result != null ? result.GetType().GetOperationName() : "")));
                     }
 
-                    //ContentType='text/html' is the default for a HttpResponse
-                    //Do not override if another has been set
-                    if (response.ContentType == null || response.ContentType == MimeTypes.Html)
-                    {
-                        response.ContentType = defaultContentType;
-                    }
-                    if (bodyPrefix != null && response.ContentType.IndexOf(MimeTypes.Json, StringComparison.InvariantCultureIgnoreCase) >= 0)
-                    {
-                        response.ContentType = MimeTypes.JavaScript;
-                    }
+                    if (bodyPrefix != null)
+                        response.OutputStream.Write(bodyPrefix, 0, bodyPrefix.Length);
 
-                    if (HostContext.Config.AppendUtf8CharsetOnContentTypes.Contains(response.ContentType))
-                    {
-                        response.ContentType += ContentFormat.Utf8Suffix;
-                    }
+                    if (result != null)
+                        defaultAction(request, result, response);
 
-                    using (resultScope)
-                    using (HostContext.Config.AllowJsConfig ? JsConfig.CreateScope(request.QueryString[Keywords.JsConfig]) : null)
-                    {
-                        var disposableResult = result as IDisposable;
-                        if (WriteToOutputStream(response, result, bodyPrefix, bodySuffix))
-                        {
-                            response.Flush(); //required for Compression
-                            if (disposableResult != null) disposableResult.Dispose();
-                            return TypeConstants.TrueTask;
-                        }
+                    if (bodySuffix != null)
+                        response.OutputStream.Write(bodySuffix, 0, bodySuffix.Length);
 
-                        if (httpResult != null)
-                            result = httpResult.Response;
-
-                        var responseText = result as string;
-                        if (responseText != null)
-                        {
-                            if (bodyPrefix != null) response.OutputStream.Write(bodyPrefix, 0, bodyPrefix.Length);
-
-                            if (response.ContentType == null || response.ContentType == MimeTypes.Html)
-                                response.ContentType = defaultContentType;
-                            response.Write(responseText);
-
-                            if (bodySuffix != null) response.OutputStream.Write(bodySuffix, 0, bodySuffix.Length);
-                            return TypeConstants.TrueTask;
-                        }
-
-                        if (defaultAction == null)
-                        {
-                            throw new ArgumentNullException("defaultAction", String.Format(
-                                "As result '{0}' is not a supported responseType, a defaultAction must be supplied",
-                                (result != null ? result.GetType().GetOperationName() : "")));
-                        }
-
-                        if (bodyPrefix != null)
-                            response.OutputStream.Write(bodyPrefix, 0, bodyPrefix.Length);
-
-                        if (result != null)
-                            defaultAction(request, result, response);
-
-                        if (bodySuffix != null)
-                            response.OutputStream.Write(bodySuffix, 0, bodySuffix.Length);
-
-                        if (disposableResult != null)
-                            disposableResult.Dispose();
-                    }
-
-                    return TypeConstants.FalseTask;
+                    if (disposableResult != null)
+                        disposableResult.Dispose();
                 }
-                catch (Exception originalEx)
-                {
-                    return HandleResponseWriteException(originalEx, request, response, defaultContentType);
-                }
-                finally
-                {
-                    response.EndRequest(skipHeaders: true);
-                }
+
+                return false;
+            }
+            catch (Exception originalEx)
+            {
+                return HandleResponseWriteException(originalEx, request, response, defaultContentType).Result;
+            }
+            finally
+            {
+                response.EndRequest(skipHeaders: true);
             }
         }
 

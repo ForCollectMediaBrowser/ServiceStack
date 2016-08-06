@@ -107,6 +107,47 @@ namespace ServiceStack.Host.Handlers
             }
         }
 
+        public async Task<object> HandleResponseAsync(object response)
+        {
+            var taskResponse = response as Task;
+
+            if (taskResponse == null)
+            {
+                return response;
+            }
+
+            await taskResponse.ConfigureAwait(false);
+
+            var taskResult = taskResponse.GetResult();
+
+            var taskResults = taskResult as Task[];
+
+            if (taskResults == null)
+            {
+                var subTask = taskResult as Task;
+                if (subTask != null)
+                    taskResult = subTask.GetResult();
+
+                return taskResult;
+            }
+
+            if (taskResults.Length == 0)
+            {
+                return TypeConstants.EmptyObjectArray;
+            }
+
+            var firstResponse = taskResults[0].GetResult();
+            var batchedResponses = firstResponse != null
+                ? (object[])Array.CreateInstance(firstResponse.GetType(), taskResults.Length)
+                : new object[taskResults.Length];
+            batchedResponses[0] = firstResponse;
+            for (var i = 1; i < taskResults.Length; i++)
+            {
+                batchedResponses[i] = taskResults[i].GetResult();
+            }
+            return batchedResponses;
+        }
+
         public static object DeserializeHttpRequest(Type operationType, IRequest httpReq, string contentType)
         {
             var httpMethod = httpReq.Verb;
@@ -146,7 +187,7 @@ namespace ServiceStack.Host.Handlers
             {
                 var msg = "Could not deserialize '{0}' request using {1}'\nError: {2}"
                     .Fmt(contentType, requestType, ex);
-                throw new SerializationException(msg, ex);
+                throw new SerializationException(msg);
             }
             return requestType.CreateInstance(); //Return an empty DTO, even for empty request bodies
         }

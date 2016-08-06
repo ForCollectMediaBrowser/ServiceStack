@@ -49,7 +49,7 @@ namespace ServiceStack.Host
             {
                 string contentType;
                 this.RestPath = FindMatchingRestPath(httpMethod, pathInfo, out contentType);
-                
+
                 if (contentType != null)
                     ResponseContentType = contentType;
             }
@@ -66,19 +66,18 @@ namespace ServiceStack.Host
             return true;
         }
 
-        public override Task ProcessRequestAsync(IRequest httpReq, IResponse httpRes, string operationName)
+        public override async Task ProcessRequestAsync(IRequest httpReq, IResponse httpRes, string operationName)
         {
             try
             {
                 var appHost = HostContext.AppHost;
-                if (appHost.ApplyPreRequestFilters(httpReq, httpRes)) 
-                    return TypeConstants.EmptyTask;
-                
+                if (appHost.ApplyPreRequestFilters(httpReq, httpRes))
+                    return;
+
                 var restPath = GetRestPath(httpReq.Verb, httpReq.PathInfo);
                 if (restPath == null)
                 {
-                    return new NotSupportedException("No RestPath found for: " + httpReq.Verb + " " + httpReq.PathInfo)
-                        .AsTaskException();
+                    throw new NotSupportedException("No RestPath found for: " + httpReq.Verb + " " + httpReq.PathInfo);
                 }
                 httpReq.SetRoute(restPath as RestPath);
 
@@ -96,38 +95,38 @@ namespace ServiceStack.Host
 
                 var request = httpReq.Dto = CreateRequest(httpReq, restPath);
 
-                if (appHost.ApplyRequestFilters(httpReq, httpRes, request)) 
-                    return TypeConstants.EmptyTask;
+                if (appHost.ApplyRequestFilters(httpReq, httpRes, request))
+                    return;
 
                 var rawResponse = GetResponse(httpReq, request);
 
                 if (httpRes.IsClosed)
-                    return TypeConstants.EmptyTask;
+                    return;
 
-                return HandleResponse(rawResponse, response =>
-                {
-                    response = appHost.ApplyResponseConverters(httpReq, response);
+                var response = await HandleResponseAsync(rawResponse).ConfigureAwait(false);
 
-                    if (appHost.ApplyResponseFilters(httpReq, httpRes, response)) 
-                        return TypeConstants.EmptyTask;
+                response = appHost.ApplyResponseConverters(httpReq, response);
 
-                    if (responseContentType.Contains("jsv") && !string.IsNullOrEmpty(httpReq.QueryString[Keywords.Debug]))
-                        return WriteDebugResponse(httpRes, response);
+                if (appHost.ApplyResponseFilters(httpReq, httpRes, response))
+                    return;
 
-                    if (doJsonp && !(response is CompressedResult))
-                        return httpRes.WriteToResponse(httpReq, response, (callback + "(").ToUtf8Bytes(), ")".ToUtf8Bytes());
-                    
-                    return httpRes.WriteToResponse(httpReq, response);
-                },  
-                ex => !HostContext.Config.WriteErrorsToResponse 
-                    ? ex.ApplyResponseConverters(httpReq).AsTaskException()
-                    : HandleException(httpReq, httpRes, operationName, ex.ApplyResponseConverters(httpReq)));
+                if (responseContentType.Contains("jsv") && !string.IsNullOrEmpty(httpReq.QueryString[Keywords.Debug]))
+                    await WriteDebugResponse(httpRes, response).ConfigureAwait(false);
+
+                if (doJsonp && !(response is CompressedResult))
+                    await httpRes.WriteToResponse(httpReq, response, (callback + "(").ToUtf8Bytes(), ")".ToUtf8Bytes()).ConfigureAwait(false);
+
+                await httpRes.WriteToResponse(httpReq, response).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                return !HostContext.Config.WriteErrorsToResponse
-                    ? ex.ApplyResponseConverters(httpReq).AsTaskException()
-                    : HandleException(httpReq, httpRes, operationName, ex.ApplyResponseConverters(httpReq));
+                if (HostContext.Config.WriteErrorsToResponse)
+                {
+                    var task = HandleException(httpReq, httpRes, operationName, ex.ApplyResponseConverters(httpReq));
+                    Task.WaitAll(task);
+                    return;
+                }
+                throw ex.ApplyResponseConverters(httpReq);
             }
         }
 
@@ -142,16 +141,13 @@ namespace ServiceStack.Host
 
         public static object CreateRequest(IRequest httpReq, IRestPath restPath)
         {
-            using (Profiler.Current.Step("Deserialize Request"))
-            {
-                var dtoFromBinder = GetCustomRequestFromBinder(httpReq, restPath.RequestType);
-                if (dtoFromBinder != null)
-                    return HostContext.AppHost.ApplyRequestConverters(httpReq, dtoFromBinder);
+            var dtoFromBinder = GetCustomRequestFromBinder(httpReq, restPath.RequestType);
+            if (dtoFromBinder != null)
+                return HostContext.AppHost.ApplyRequestConverters(httpReq, dtoFromBinder);
 
-                var requestParams = httpReq.GetFlattenedRequestParams();
-                return HostContext.AppHost.ApplyRequestConverters(httpReq,
-                    CreateRequest(httpReq, restPath, requestParams));
-            }
+            var requestParams = httpReq.GetFlattenedRequestParams();
+            return HostContext.AppHost.ApplyRequestConverters(httpReq,
+                CreateRequest(httpReq, restPath, requestParams));
         }
 
         public static object CreateRequest(IRequest httpReq, IRestPath restPath, Dictionary<string, string> requestParams)
